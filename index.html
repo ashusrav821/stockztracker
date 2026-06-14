@@ -178,7 +178,7 @@
         const CONFIG = {
             WORKER_BASE: 'https://stock-tracker-api.oletyashrith.workers.dev',
             REFRESH_MS: 60000,
-            CHART_WINDOW_DAYS: 90,
+            CHART_WINDOW_DAYS: 252, // ~1 trading year
             SMA_PERIOD: 50,
             RSI_PERIOD: 14,
             BB_PERIOD: 20,
@@ -428,6 +428,8 @@
         function computeIndicatorSet(prices, ohlc, extras) {
             const set = {
                 sma: getSMAArray(prices),
+                sma20: getSMAArray(prices, 20),
+                ema20: getEMAArray(prices, 20),
                 bb: getBBArray(prices),
                 rsi: getRSIArray(prices),
                 macd: getMACDArray(prices),
@@ -443,7 +445,7 @@
 
         // --- API Data Fetching (via Cloudflare Worker proxy) ---
         async function fetchStockData(ticker) {
-            const res = await fetch(`${CONFIG.WORKER_BASE}/api/chart?ticker=${encodeURIComponent(ticker)}&range=6mo&interval=1d`);
+            const res = await fetch(`${CONFIG.WORKER_BASE}/api/chart?ticker=${encodeURIComponent(ticker)}&range=1y&interval=1d`);
             if (!res.ok) {
                 let msg = `HTTP ${res.status}`;
                 try { const j = await res.json(); if(j.error) msg = j.error; } catch(e) {}
@@ -558,7 +560,7 @@
         // --- Core Application Loop ---
         async function updateData() {
             await Promise.all(appState.watchlist.map(async ticker => {
-                if(!appState.indicators[ticker]) appState.indicators[ticker] = {sma:false, bb:false, rsi:false, macd:false};
+                if(!appState.indicators[ticker]) appState.indicators[ticker] = {sma:false, sma20:false, ema20:false, bb:false, rsi:false, macd:false};
                 if(!appState.alerts[ticker]) appState.alerts[ticker] = [];
 
                 try {
@@ -731,6 +733,8 @@
                         <div class="panel chart-container ${ui.charts[ticker] ? 'active' : ''}">
                             <div class="indicator-toggles">
                                 <button class="ind-btn ${inds.sma?'active':''}" onclick="toggleUI('${ticker}', 'ind', 'sma')">SMA (50)</button>
+                                <button class="ind-btn ${inds.sma20?'active':''}" onclick="toggleUI('${ticker}', 'ind', 'sma20')">SMA (20)</button>
+                                <button class="ind-btn ${inds.ema20?'active':''}" onclick="toggleUI('${ticker}', 'ind', 'ema20')">EMA (20)</button>
                                 <button class="ind-btn ${inds.bb?'active':''}" onclick="toggleUI('${ticker}', 'ind', 'bb')">Bollinger Bands</button>
                                 <button class="ind-btn ${inds.rsi?'active':''}" onclick="toggleUI('${ticker}', 'ind', 'rsi')">RSI</button>
                                 <button class="ind-btn ${inds.macd?'active':''}" onclick="toggleUI('${ticker}', 'ind', 'macd')">MACD</button>
@@ -781,6 +785,8 @@
             const cBuy = '#32d74b';
             const cSell = '#ff453a';
             const cSma = '#f5a623';
+            const cSma20 = '#5ac8fa';
+            const cEma20 = '#bf5af2';
             const cBb = isLight ? 'rgba(0, 0, 0, 0.2)' : 'rgba(255, 255, 255, 0.3)';
             const cRsi = '#b58900';
             const cMacd = '#d33682';
@@ -798,7 +804,9 @@
                 borderWidth: 2, pointRadius: 0, fill: false, tension: 0.1, yAxisID: 'y'
             }];
 
-            if(inds.sma) datasets.push({ label: 'SMA', data: data.computed.sma.slice(-sl), borderColor: cSma, borderWidth: 1.5, borderDash: [5, 5], pointRadius: 0, yAxisID: 'y' });
+            if(inds.sma) datasets.push({ label: 'SMA (50)', data: data.computed.sma.slice(-sl), borderColor: cSma, borderWidth: 1.5, borderDash: [5, 5], pointRadius: 0, yAxisID: 'y' });
+            if(inds.sma20) datasets.push({ label: 'SMA (20)', data: data.computed.sma20.slice(-sl), borderColor: cSma20, borderWidth: 1.5, borderDash: [5, 5], pointRadius: 0, yAxisID: 'y' });
+            if(inds.ema20) datasets.push({ label: 'EMA (20)', data: data.computed.ema20.slice(-sl), borderColor: cEma20, borderWidth: 1.5, pointRadius: 0, yAxisID: 'y' });
             if(inds.bb) { let bb = data.computed.bb; datasets.push({ label: 'BB Upper', data: bb.upper.slice(-sl), borderColor: cBb, borderWidth: 1, pointRadius: 0, yAxisID: 'y' }, { label: 'BB Lower', data: bb.lower.slice(-sl), borderColor: cBb, borderWidth: 1, pointRadius: 0, yAxisID: 'y' }); }
             
             let hasOscillator = inds.rsi || inds.macd;
@@ -806,7 +814,11 @@
             if(inds.macd) { let m = data.computed.macd; datasets.push({ label: 'MACD', data: m.macd.slice(-sl), borderColor: cMacd, borderWidth: 1.5, pointRadius: 0, yAxisID: 'y2', spanGaps: true }, { label: 'Signal', data: m.signal.slice(-sl), borderColor: '#859900', borderWidth: 1, pointRadius: 0, yAxisID: 'y2', spanGaps: true }); }
 
             let scales = {
-                x: { display: false },
+                x: {
+                    display: true,
+                    ticks: { color: tickColor, maxRotation: 0, autoSkip: true, maxTicksLimit: 6 },
+                    grid: { display: false }
+                },
                 y: { type: 'linear', position: 'right', ticks: { color: tickColor }, grid: { color: gridColor } }
             };
             if(hasOscillator) scales.y2 = { type: 'linear', position: 'left', ticks: { color: tickColor }, grid: { display: false }, min: (inds.rsi && !inds.macd) ? 0 : undefined, max: (inds.rsi && !inds.macd) ? 100 : undefined };
