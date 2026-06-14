@@ -100,6 +100,17 @@
         .active-alert { display: flex; justify-content: space-between; align-items: center; background: var(--input-bg); padding: 8px 12px; border-radius: 8px; margin-bottom: 8px; font-size: 0.85rem; border-left: 3px solid var(--accent); }
         .del-alert { background: transparent; color: var(--sell-color); border: none; cursor: pointer; font-weight: bold; }
 
+        /* Composite Signal Panel */
+        .signal-panel { background: var(--input-bg); border-radius: 12px; padding: 12px 14px; margin: 4px 0 12px; }
+        .signal-header { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+        .confidence-bar-wrap { flex: 1; height: 6px; background: var(--card-border); border-radius: 4px; overflow: hidden; }
+        .confidence-bar { display: block; height: 100%; border-radius: 4px; transition: width 0.3s ease; }
+        .confidence-label { font-size: 0.75rem; color: var(--text-sub); white-space: nowrap; }
+        .signal-reasons { margin: 0; padding-left: 18px; font-size: 0.8rem; color: var(--text-sub); }
+        .signal-reasons li { margin-bottom: 2px; }
+        .signal-levels { display: flex; gap: 16px; flex-wrap: wrap; margin-top: 8px; font-size: 0.8rem; color: var(--text-sub); }
+        .signal-levels strong { color: var(--text-main); }
+
         /* Sync / PIN */
         .sync-row { display: flex; gap: 8px; margin-top: 10px; align-items: center; }
         .sync-row input { flex: 1; padding: 10px 14px; font-size: 0.95rem; background-color: var(--input-bg); border: 1px solid var(--card-border); color: var(--text-main); border-radius: 10px; letter-spacing: 2px; }
@@ -185,6 +196,8 @@
             ui: { charts: {}, news: {}, alerts: {} },
             dataCache: {},
             newsCache: {},
+            sentimentCache: {},
+            earningsCache: {},
             errors: {},
             pin: localStorage.getItem('syncPin') || ''
         };
@@ -214,15 +227,218 @@
         function getRSIArray(prices, period = CONFIG.RSI_PERIOD) { let rsi=[], gains=0, losses=0; for(let i=0; i<prices.length; i++) { if(i<period){rsi.push(null);continue;} if(i===period){for(let j=1;j<=period;j++){let d=prices[j]-prices[j-1]; if(d>0)gains+=d; else losses-=d;} }else{let d=prices[i]-prices[i-1]; gains=((gains*(period-1))+(d>0?d:0))/period; losses=((losses*(period-1))+(d<0?-d:0))/period; } let rs=losses===0?100:gains/losses; rsi.push(100-(100/(1+rs))); } return rsi; }
         function getMACDArray(prices, fast = CONFIG.MACD_FAST, slow = CONFIG.MACD_SLOW, signalPeriod = CONFIG.MACD_SIGNAL) { let emaFast=getEMAArray(prices, fast), emaSlow=getEMAArray(prices, slow), macd=prices.map((_,i)=>i>=slow-1 ? emaFast[i]-emaSlow[i] : null); let validMacd = macd.filter(x=>x!==null); let signalValid = getEMAArray(validMacd, signalPeriod); let signal = Array(macd.length - signalValid.length).fill(null).concat(signalValid); return {macd, signal}; }
 
+        // True Range / ATR — uses OHLC candles. Falls back gracefully if ohlc missing.
+        function getTRArray(ohlc) {
+            return ohlc.map((c, i) => {
+                if (i === 0 || c.h === null || c.l === null) return null;
+                const prevClose = ohlc[i-1].c;
+                return Math.max(c.h - c.l, Math.abs(c.h - prevClose), Math.abs(c.l - prevClose));
+            });
+        }
+        function getATRArray(ohlc, period = 14) {
+            const tr = getTRArray(ohlc);
+            const atr = [];
+            let prevAtr = null;
+            for (let i = 0; i < tr.length; i++) {
+                if (tr[i] === null) { atr.push(null); continue; }
+                if (prevAtr === null) {
+                    // seed with simple average of first `period` TRs
+                    const slice = tr.slice(Math.max(1, i - period + 1), i + 1).filter(x => x !== null);
+                    if (slice.length < period) { atr.push(null); continue; }
+                    prevAtr = slice.reduce((a,b)=>a+b, 0) / period;
+                    atr.push(prevAtr);
+                } else {
+                    prevAtr = (prevAtr * (period - 1) + tr[i]) / period;
+                    atr.push(prevAtr);
+                }
+            }
+            return atr;
+        }
+
+        // ADX (Average Directional Index) — Wilder's smoothing. Returns {adx, plusDI, minusDI}.
+        function getADXArray(ohlc, period = 14) {
+            const len = ohlc.length;
+            const plusDM = new Array(len).fill(null);
+            const minusDM = new Array(len).fill(null);
+            const tr = getTRArray(ohlc);
+
+            for (let i = 1; i < len; i++) {
+                if (ohlc[i].h === null || ohlc[i-1].h === null) continue;
+                const upMove = ohlc[i].h - ohlc[i-1].h;
+                const downMove = ohlc[i-1].l - ohlc[i].l;
+                plusDM[i] = (upMove > downMove && upMove > 0) ? upMove : 0;
+                minusDM[i] = (downMove > upMove && downMove > 0) ? downMove : 0;
+            }
+
+            const smooth = (arr) => {
+                const out = new Array(len).fill(null);
+                let prev = null;
+                for (let i = 0; i < len; i++) {
+                    if (arr[i] === null) continue;
+                    if (prev === null) {
+                        const slice = arr.slice(Math.max(0, i - period + 1), i + 1).filter(x => x !== null);
+                        if (slice.length < period) continue;
+                        prev = slice.reduce((a,b)=>a+b, 0);
+                        out[i] = prev;
+                    } else {
+                        prev = prev - (prev / period) + arr[i];
+                        out[i] = prev;
+                    }
+                }
+                return out;
+            };
+
+            const smoothedTR = smooth(tr);
+            const smoothedPlusDM = smooth(plusDM);
+            const smoothedMinusDM = smooth(minusDM);
+
+            const plusDI = new Array(len).fill(null);
+            const minusDI = new Array(len).fill(null);
+            const dx = new Array(len).fill(null);
+
+            for (let i = 0; i < len; i++) {
+                if (smoothedTR[i] === null || smoothedTR[i] === 0) continue;
+                plusDI[i] = 100 * smoothedPlusDM[i] / smoothedTR[i];
+                minusDI[i] = 100 * smoothedMinusDM[i] / smoothedTR[i];
+                const sum = plusDI[i] + minusDI[i];
+                dx[i] = sum === 0 ? 0 : 100 * Math.abs(plusDI[i] - minusDI[i]) / sum;
+            }
+
+            // ADX = Wilder smoothed average of DX
+            const adx = new Array(len).fill(null);
+            let prevAdx = null;
+            let dxStartIdx = dx.findIndex(x => x !== null);
+            for (let i = 0; i < len; i++) {
+                if (dx[i] === null) continue;
+                if (prevAdx === null) {
+                    const slice = dx.slice(dxStartIdx, dxStartIdx + period).filter(x => x !== null);
+                    if (i < dxStartIdx + period - 1) continue;
+                    prevAdx = slice.reduce((a,b)=>a+b, 0) / slice.length;
+                    adx[i] = prevAdx;
+                } else {
+                    prevAdx = (prevAdx * (period - 1) + dx[i]) / period;
+                    adx[i] = prevAdx;
+                }
+            }
+
+            return { adx, plusDI, minusDI };
+        }
+
+        // Recent swing high/low over a lookback window — simple support/resistance proxy
+        function getSwingLevels(ohlc, lookback = 20) {
+            const slice = ohlc.slice(-lookback).filter(c => c.h !== null && c.l !== null);
+            if (!slice.length) return { swingHigh: null, swingLow: null };
+            return {
+                swingHigh: Math.max(...slice.map(c => c.h)),
+                swingLow: Math.min(...slice.map(c => c.l)),
+            };
+        }
+
+        // Composite confluence score combining trend, momentum, volatility, and structure.
+        // Returns a signal object: { signal, score, confidence, reasons[], stopLoss, takeTarget }
+        function getCompositeSignal(prices, computed, ohlc, extras) {
+            extras = extras || {};
+            const i = prices.length - 1;
+            const currentPrice = prices[i];
+            const reasons = [];
+            let score = 0; // positive = bullish, negative = bearish
+            let maxScore = 4;
+
+            const rsi = computed.rsi[i];
+            const sma = computed.sma[i];
+            const macd = computed.macd.macd[i];
+            const macdSignal = computed.macd.signal[i];
+            const adx = computed.adx ? computed.adx.adx[i] : null;
+            const plusDI = computed.adx ? computed.adx.plusDI[i] : null;
+            const minusDI = computed.adx ? computed.adx.minusDI[i] : null;
+            const atr = computed.atr ? computed.atr[i] : null;
+
+            // Momentum: RSI
+            if (rsi !== null) {
+                if (rsi < 30) { score += 1; reasons.push(`RSI oversold (${rsi.toFixed(1)})`); }
+                else if (rsi > 70) { score -= 1; reasons.push(`RSI overbought (${rsi.toFixed(1)})`); }
+            }
+
+            // Trend direction: price vs SMA
+            if (sma !== null) {
+                if (currentPrice > sma) { score += 1; reasons.push(`Price above SMA${CONFIG.SMA_PERIOD}`); }
+                else { score -= 1; reasons.push(`Price below SMA${CONFIG.SMA_PERIOD}`); }
+            }
+
+            // Momentum: MACD vs signal line
+            if (macd !== null && macdSignal !== null) {
+                if (macd > macdSignal) { score += 1; reasons.push('MACD above signal line'); }
+                else { score -= 1; reasons.push('MACD below signal line'); }
+            }
+
+            // Trend strength: ADX + DI direction
+            let trendStrength = 'weak';
+            if (adx !== null) {
+                if (adx > 25) {
+                    trendStrength = 'strong';
+                    if (plusDI > minusDI) { score += 1; reasons.push(`Strong uptrend (ADX ${adx.toFixed(1)}, +DI>-DI)`); }
+                    else { score -= 1; reasons.push(`Strong downtrend (ADX ${adx.toFixed(1)}, -DI>+DI)`); }
+                } else {
+                    reasons.push(`Weak/no trend (ADX ${adx.toFixed(1)}) — signals less reliable`);
+                }
+            }
+
+            // News sentiment (Finnhub): bullishPercent vs bearishPercent
+            if (extras.sentiment && extras.sentiment.bullishPercent !== null && extras.sentiment.bearishPercent !== null) {
+                const { bullishPercent, bearishPercent } = extras.sentiment;
+                maxScore += 1;
+                const diff = bullishPercent - bearishPercent;
+                if (diff > 10) { score += 1; reasons.push(`News sentiment bullish (${bullishPercent}% vs ${bearishPercent}%)`); }
+                else if (diff < -10) { score -= 1; reasons.push(`News sentiment bearish (${bullishPercent}% vs ${bearishPercent}%)`); }
+                else { reasons.push(`News sentiment mixed (${bullishPercent}% vs ${bearishPercent}%)`); }
+            }
+
+            let signal = 'HOLD';
+            if (score >= 2) signal = 'BUY';
+            else if (score <= -2) signal = 'SELL';
+
+            // Confidence scales with |score| and trend strength
+            let confidence = Math.min(100, Math.round((Math.abs(score) / maxScore) * 100));
+            if (trendStrength === 'weak') confidence = Math.round(confidence * 0.6);
+
+            // Earnings proximity warning — reduce confidence near earnings (volatility/gap risk)
+            if (extras.earnings && extras.earnings.daysUntil !== null && extras.earnings.daysUntil <= 3 && extras.earnings.daysUntil >= 0) {
+                const when = extras.earnings.daysUntil === 0 ? 'today' : `in ${extras.earnings.daysUntil}d`;
+                reasons.push(`⚠ Earnings ${when} — expect volatility, signal less reliable`);
+                confidence = Math.round(confidence * 0.5);
+            }
+
+            // Risk levels via ATR (if available), else swing levels
+            let stopLoss = null, takeTarget = null;
+            if (atr !== null) {
+                if (signal === 'BUY') {
+                    stopLoss = currentPrice - 1.5 * atr;
+                    takeTarget = currentPrice + 3 * atr;
+                } else if (signal === 'SELL') {
+                    stopLoss = currentPrice + 1.5 * atr;
+                    takeTarget = currentPrice - 3 * atr;
+                }
+            }
+
+            return { signal, score, confidence, reasons, stopLoss, takeTarget, trendStrength, atr };
+        }
+
         // Compute and cache all indicator arrays for a ticker's full price history.
         // Avoids recomputing on every render / chart redraw.
-        function computeIndicatorSet(prices) {
-            return {
+        function computeIndicatorSet(prices, ohlc, extras) {
+            const set = {
                 sma: getSMAArray(prices),
                 bb: getBBArray(prices),
                 rsi: getRSIArray(prices),
                 macd: getMACDArray(prices),
             };
+            if (ohlc && ohlc.length === prices.length && ohlc.some(c => c.h !== null)) {
+                set.atr = getATRArray(ohlc);
+                set.adx = getADXArray(ohlc);
+                set.swing = getSwingLevels(ohlc);
+            }
+            set.composite = getCompositeSignal(prices, set, ohlc || [], extras);
+            return set;
         }
 
         // --- API Data Fetching (via Cloudflare Worker proxy) ---
@@ -235,7 +451,7 @@
             }
             const data = await res.json();
             if (!data.prices || !data.prices.length) throw new Error('No price data returned');
-            return { prices: data.prices, dates: data.dates };
+            return { prices: data.prices, dates: data.dates, ohlc: data.ohlc || [] };
         }
 
         async function fetchNews(ticker) {
@@ -245,6 +461,23 @@
                 const data = await res.json();
                 return data.news || [];
             } catch(e) { return []; }
+        }
+
+        // Sentiment/earnings change slowly — fetch once per session per ticker, cached in appState
+        async function fetchSentiment(ticker) {
+            try {
+                const res = await fetch(`${CONFIG.WORKER_BASE}/api/sentiment?ticker=${encodeURIComponent(ticker)}`);
+                if (!res.ok) return null;
+                return await res.json();
+            } catch(e) { return null; }
+        }
+
+        async function fetchEarnings(ticker) {
+            try {
+                const res = await fetch(`${CONFIG.WORKER_BASE}/api/earnings?ticker=${encodeURIComponent(ticker)}`);
+                if (!res.ok) return null;
+                return await res.json();
+            } catch(e) { return null; }
         }
 
         // --- Watchlist Sync (PIN-based, Cloudflare KV) ---
@@ -330,7 +563,11 @@
 
                 try {
                     const data = await fetchStockData(ticker);
-                    data.computed = computeIndicatorSet(data.prices);
+                    const extras = {
+                        sentiment: appState.sentimentCache[ticker] || null,
+                        earnings: appState.earningsCache[ticker] || null,
+                    };
+                    data.computed = computeIndicatorSet(data.prices, data.ohlc, extras);
                     appState.dataCache[ticker] = data;
                     delete appState.errors[ticker];
                 } catch(e) {
@@ -339,6 +576,17 @@
 
                 if(appState.ui.news[ticker] && !appState.newsCache[ticker]) {
                     appState.newsCache[ticker] = await fetchNews(ticker);
+                }
+
+                // Sentiment/earnings change slowly — fetch once per ticker, then recompute composite
+                if(!appState.sentimentCache[ticker] && !appState.earningsCache[ticker]) {
+                    const [sentiment, earnings] = await Promise.all([fetchSentiment(ticker), fetchEarnings(ticker)]);
+                    appState.sentimentCache[ticker] = sentiment;
+                    appState.earningsCache[ticker] = earnings;
+                    const cached = appState.dataCache[ticker];
+                    if (cached) {
+                        cached.computed = computeIndicatorSet(cached.prices, cached.ohlc, { sentiment, earnings });
+                    }
                 }
                 evaluateAlerts(ticker);
             }));
@@ -426,9 +674,8 @@
                 const rsi = data.computed.rsi[data.computed.rsi.length-1].toFixed(1);
                 const sma = data.computed.sma[data.computed.sma.length-1].toFixed(2);
 
-                let signal = 'HOLD', sigClass = 'hold';
-                if (rsi < 30 && currentPrice > sma) { signal = 'BUY'; sigClass = 'buy'; } 
-                else if (rsi > 70 && currentPrice < sma) { signal = 'SELL'; sigClass = 'sell'; }
+                const comp = data.computed.composite;
+                const sigClass = comp.signal === 'BUY' ? 'buy' : comp.signal === 'SELL' ? 'sell' : 'hold';
 
                 const ui = appState.ui;
                 const inds = appState.indicators[ticker];
@@ -450,12 +697,35 @@
                         </div>`).join('');
                 }
 
+                let signalHtml = `
+                    <div class="signal-panel">
+                        <div class="signal-header">
+                            <span class="badge ${sigClass}">${comp.signal}</span>
+                            <span class="confidence-bar-wrap">
+                                <span class="confidence-bar" style="width:${comp.confidence}%; background:${sigClass==='buy'?'var(--buy-color)':sigClass==='sell'?'var(--sell-color)':'var(--hold-color)'}"></span>
+                            </span>
+                            <span class="confidence-label">${comp.confidence}% confidence</span>
+                        </div>
+                        <ul class="signal-reasons">
+                            ${comp.reasons.map(r => `<li>${r}</li>`).join('')}
+                        </ul>
+                        ${comp.stopLoss !== null ? `
+                        <div class="signal-levels">
+                            <span>Stop-loss: <strong>$${comp.stopLoss.toFixed(2)}</strong></span>
+                            <span>Target: <strong>$${comp.takeTarget.toFixed(2)}</strong></span>
+                            <span>ATR: ${comp.atr.toFixed(2)}</span>
+                        </div>` : (comp.atr !== null ? `<div class="signal-levels"><span>ATR: ${comp.atr.toFixed(2)} (no active trade levels — signal is HOLD)</span></div>` : '<div class="signal-levels"><span style="color:var(--text-sub)">OHLC data unavailable — ATR/ADX not computed</span></div>')}
+                    </div>`;
+
                 html += `
                     <div class="stock-card">
                         <div class="card-top">
                             <div><h2 class="ticker">${ticker}</h2><div class="stats-row"><span>RSI: ${rsi} &nbsp;•&nbsp; SMA: $${sma}</span></div></div>
-                            <div style="text-align: right;"><h2 class="price" style="color: ${isBullish ? 'var(--buy-color)' : 'var(--sell-color)'}">$${currentPrice.toFixed(2)}</h2><span class="badge ${sigClass}">${signal}</span></div>
+                            <div style="text-align: right;"><h2 class="price" style="color: ${isBullish ? 'var(--buy-color)' : 'var(--sell-color)'}">$${currentPrice.toFixed(2)}</h2><span class="badge ${sigClass}">${comp.signal}</span></div>
                         </div>
+
+                        <!-- Signal Detail -->
+                        ${signalHtml}
 
                         <!-- Panel: CHART -->
                         <div class="panel chart-container ${ui.charts[ticker] ? 'active' : ''}">
@@ -597,7 +867,11 @@
             (async () => {
                 try {
                     const data = await fetchStockData(ticker);
-                    data.computed = computeIndicatorSet(data.prices);
+                    const extras = {
+                        sentiment: appState.sentimentCache[ticker] || null,
+                        earnings: appState.earningsCache[ticker] || null,
+                    };
+                    data.computed = computeIndicatorSet(data.prices, data.ohlc, extras);
                     appState.dataCache[ticker] = data;
                 } catch(e) {
                     appState.errors[ticker] = e.message || 'Failed to load';
