@@ -120,6 +120,20 @@
         .sync-status.error { color: var(--sell-color); }
         .sync-status.ok { color: var(--buy-color); }
 
+        /* Tabs */
+        .tab-row { display: flex; gap: 8px; margin-top: 12px; border-bottom: 1px solid var(--card-border); }
+        .tab-btn { flex: 1; padding: 10px 0; background: none; border: none; color: var(--text-sub); font-size: 0.9rem; font-weight: 600; cursor: pointer; border-bottom: 2px solid transparent; }
+        .tab-btn.active { color: var(--text-main); border-bottom: 2px solid var(--accent); }
+
+        /* Guide */
+        .guide-section { background-color: var(--card-bg); border: 1px solid var(--card-border); border-radius: 16px; margin-bottom: 14px; padding: 16px; }
+        .guide-section h3 { margin: 0 0 6px 0; font-size: 1rem; }
+        .guide-section p { margin: 0 0 8px 0; font-size: 0.85rem; color: var(--text-sub); line-height: 1.5; }
+        .guide-section p:last-child { margin-bottom: 0; }
+        .guide-section .guide-formula { font-family: monospace; font-size: 0.78rem; background: var(--input-bg); padding: 8px 10px; border-radius: 8px; display: block; margin: 6px 0; color: var(--text-main); overflow-x: auto; }
+        .guide-section ul { margin: 6px 0; padding-left: 20px; font-size: 0.85rem; color: var(--text-sub); line-height: 1.6; }
+        .guide-section li strong { color: var(--text-main); }
+
         /* Error / loading card */
         .info-card { background-color: var(--card-bg); border: 1px solid var(--card-border); border-radius: 16px; margin-bottom: 16px; padding: 16px; text-align: center; color: var(--text-sub); font-size: 0.9rem; }
         .info-card.error-card { border-color: rgba(255, 69, 58, 0.3); color: var(--sell-color); }
@@ -143,11 +157,17 @@
             <button class="primary" onclick="saveToPin()">Save</button>
         </div>
         <div class="sync-status" id="syncStatus"></div>
+        <div class="tab-row">
+            <button class="tab-btn active" id="tab-portfolio" onclick="switchTab('portfolio')">Portfolio</button>
+            <button class="tab-btn" id="tab-guide" onclick="switchTab('guide')">Indicator Guide</button>
+        </div>
     </header>
 
     <main id="watchlist">
         <div class="info-card">Initializing Data...</div>
     </main>
+
+    <main id="guideView" style="display:none;"></main>
 
     <script>
         // --- Theme Management ---
@@ -169,6 +189,119 @@
             localStorage.setItem('theme', newMode);
             applyTheme(newMode);
             renderUI(); // Re-draw charts with correct colors
+        }
+
+        // --- Tab Switching ---
+        function switchTab(tab) {
+            const portfolio = document.getElementById('watchlist');
+            const guide = document.getElementById('guideView');
+            const tabPortfolio = document.getElementById('tab-portfolio');
+            const tabGuide = document.getElementById('tab-guide');
+
+            if (tab === 'guide') {
+                portfolio.style.display = 'none';
+                guide.style.display = 'block';
+                tabPortfolio.classList.remove('active');
+                tabGuide.classList.add('active');
+                if (!guide.dataset.rendered) {
+                    guide.innerHTML = getGuideHTML();
+                    guide.dataset.rendered = '1';
+                }
+            } else {
+                portfolio.style.display = '';
+                guide.style.display = 'none';
+                tabGuide.classList.remove('active');
+                tabPortfolio.classList.add('active');
+            }
+        }
+
+        // --- Indicator Guide Content ---
+        function getGuideHTML() {
+            return `
+                <div class="guide-section">
+                    <h3>SMA — Simple Moving Average</h3>
+                    <p>The average closing price over the last N days. SMA(50) and SMA(20) smooth out daily noise to show the underlying trend. Price above the SMA generally signals an uptrend; below signals a downtrend.</p>
+                    <span class="guide-formula">SMA = (sum of last N closes) / N</span>
+                </div>
+
+                <div class="guide-section">
+                    <h3>EMA — Exponential Moving Average</h3>
+                    <p>Like SMA, but weights recent prices more heavily, so it reacts faster to new price action. EMA(20) is more responsive than SMA(20) and is often used to catch trend changes earlier.</p>
+                    <span class="guide-formula">EMA(today) = (Price × k) + (EMA(yesterday) × (1 − k))
+where k = 2 / (N + 1)</span>
+                </div>
+
+                <div class="guide-section">
+                    <h3>Bollinger Bands</h3>
+                    <p>A band around a moving average, set N standard deviations above and below. Price hugging the upper band suggests overbought conditions; hugging the lower band suggests oversold. Bands widen when volatility increases and narrow when it decreases.</p>
+                    <span class="guide-formula">Middle = SMA(20)
+Upper/Lower = SMA(20) ± (2 × std. deviation of last 20 closes)</span>
+                </div>
+
+                <div class="guide-section">
+                    <h3>RSI — Relative Strength Index</h3>
+                    <p>Measures the speed and size of recent price changes on a 0–100 scale. Traditionally, RSI above 70 suggests overbought (potential pullback), and below 30 suggests oversold (potential bounce). RSI works best in ranging markets — during strong trends it can stay overbought/oversold for a long time.</p>
+                    <span class="guide-formula">RS = avg gain (14d) / avg loss (14d)
+RSI = 100 − (100 / (1 + RS))</span>
+                </div>
+
+                <div class="guide-section">
+                    <h3>MACD — Moving Average Convergence Divergence</h3>
+                    <p>Shows the relationship between two EMAs (12 and 26 period) as a momentum oscillator. When the MACD line crosses above its signal line, momentum is shifting bullish; crossing below suggests bearish momentum.</p>
+                    <span class="guide-formula">MACD line = EMA(12) − EMA(26)
+Signal line = EMA(9) of MACD line</span>
+                </div>
+
+                <div class="guide-section">
+                    <h3>ATR — Average True Range</h3>
+                    <p>Measures volatility (how much a stock typically moves per day), regardless of direction. Higher ATR = larger typical price swings. Used here to size stop-loss and target levels proportionally to current volatility.</p>
+                    <span class="guide-formula">True Range = max(
+  high − low,
+  |high − previous close|,
+  |low − previous close|
+)
+ATR(14) = Wilder-smoothed average of True Range</span>
+                </div>
+
+                <div class="guide-section">
+                    <h3>ADX &amp; DI+/DI− — Trend Strength &amp; Direction</h3>
+                    <p>ADX measures how strong a trend is (not its direction) on a 0–100 scale — above 25 generally indicates a strong trend, below 25 indicates a weak/ranging market where trend-following signals are less reliable. DI+ above DI− indicates upward pressure; DI− above DI+ indicates downward pressure.</p>
+                    <span class="guide-formula">+DI, −DI = smoothed directional movement / smoothed True Range, ×100
+DX = 100 × |+DI − −DI| / (+DI + −DI)
+ADX = Wilder-smoothed average of DX</span>
+                </div>
+
+                <div class="guide-section">
+                    <h3>News Sentiment (Finnhub)</h3>
+                    <p>Bullish vs bearish percentage derived from recent news coverage of the company. A gap of more than 10 points in either direction is treated as a meaningful signal; smaller gaps are considered mixed/neutral.</p>
+                </div>
+
+                <div class="guide-section">
+                    <h3>Earnings Proximity</h3>
+                    <p>If a company's next earnings report is within 3 days, the signal's confidence is reduced — earnings releases often cause sharp price gaps that can override technical signals.</p>
+                </div>
+
+                <div class="guide-section">
+                    <h3>How the Composite Signal Is Calculated</h3>
+                    <p>Each factor below contributes <strong>+1</strong> (bullish), <strong>−1</strong> (bearish), or <strong>0</strong> (neutral/unavailable) to a total score:</p>
+                    <ul>
+                        <li><strong>RSI:</strong> +1 if oversold (&lt;30), −1 if overbought (&gt;70), 0 otherwise</li>
+                        <li><strong>Price vs SMA(50):</strong> +1 if price is above, −1 if below</li>
+                        <li><strong>MACD vs Signal line:</strong> +1 if MACD is above its signal line, −1 if below</li>
+                        <li><strong>ADX + DI direction:</strong> if ADX &gt; 25 (strong trend), +1 if DI+ &gt; DI−, −1 if DI− &gt; DI+; if ADX ≤ 25, contributes 0 but flags the trend as weak</li>
+                        <li><strong>News sentiment</strong> (if available): +1 if bullish% exceeds bearish% by &gt;10 points, −1 if the reverse, 0 if mixed</li>
+                    </ul>
+                    <p><strong>Final signal:</strong></p>
+                    <ul>
+                        <li>Score ≥ <strong>+2</strong> → <strong>BUY</strong></li>
+                        <li>Score ≤ <strong>−2</strong> → <strong>SELL</strong></li>
+                        <li>Otherwise → <strong>HOLD</strong></li>
+                    </ul>
+                    <p><strong>Confidence</strong> = |score| ÷ max possible score, scaled to 0–100%. If ADX shows a weak/no trend, confidence is multiplied by 0.6. If earnings are within 3 days, confidence is further multiplied by 0.5.</p>
+                    <p><strong>Stop-loss / Target</strong> (only shown for BUY/SELL, not HOLD): set at 1.5× ATR and 3× ATR from the current price, in the direction of the trade.</p>
+                    <p style="margin-top:10px;"><em>This is decision support based on technical and sentiment data only — it is not financial advice, doesn't account for fundamentals, broader market conditions, or your personal risk tolerance, and can produce false signals especially in choppy/weak-trend markets.</em></p>
+                </div>
+            `;
         }
 
         const savedTheme = localStorage.getItem('theme') || 'dark';
@@ -816,8 +949,9 @@
             let scales = {
                 x: {
                     display: true,
-                    ticks: { color: tickColor, maxRotation: 0, autoSkip: true, maxTicksLimit: 6 },
-                    grid: { display: false }
+                    ticks: { color: tickColor, maxRotation: 0, autoSkip: true, maxTicksLimit: 10 },
+                    grid: { display: false },
+                    offset: false
                 },
                 y: { type: 'linear', position: 'right', ticks: { color: tickColor }, grid: { color: gridColor } }
             };
