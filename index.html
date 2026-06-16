@@ -111,6 +111,12 @@
         .signal-levels { display: flex; gap: 16px; flex-wrap: wrap; margin-top: 8px; font-size: 0.8rem; color: var(--text-sub); }
         .signal-levels strong { color: var(--text-main); }
 
+        /* Sentiment row */
+        .sentiment-row { display: flex; align-items: flex-start; gap: 10px; margin: -6px 0 12px; flex-wrap: wrap; }
+        .sentiment-panel { flex: 1; min-width: 0; font-size: 0.82rem; color: var(--text-sub); padding-top: 2px; }
+        .sentiment-btn { white-space: nowrap; font-size: 0.78rem; font-weight: 600; background: var(--input-bg); color: var(--text-sub); border: 1px solid var(--card-border); border-radius: 8px; padding: 6px 12px; cursor: pointer; flex-shrink: 0; }
+        .sentiment-btn:disabled { opacity: 0.5; cursor: default; }
+
         /* Sync / PIN */
         .sync-row { display: flex; gap: 8px; margin-top: 10px; align-items: center; }
         .sync-row input { flex: 1; padding: 10px 14px; font-size: 0.95rem; background-color: var(--input-bg); border: 1px solid var(--card-border); color: var(--text-main); border-radius: 10px; letter-spacing: 2px; }
@@ -724,15 +730,13 @@ ADX = Wilder-smoothed average of DX</span>
 
         // --- Core Application Loop ---
         async function updateData() {
-            // Phase 1: fetch chart data for all tickers concurrently, render each card as it arrives
-            // — don't wait for slow Finnhub calls before showing price/chart
-            const phase1 = appState.watchlist.map(async ticker => {
+            await Promise.all(appState.watchlist.map(async ticker => {
                 if(!appState.indicators[ticker]) appState.indicators[ticker] = {sma:false, sma20:false, ema20:false, bb:false, rsi:false, macd:false};
                 if(!appState.alerts[ticker]) appState.alerts[ticker] = [];
 
                 try {
                     const data = await fetchStockData(ticker);
-                    // Use already-cached extras so we don't recompute unnecessarily on 60s refresh
+                    // Only use already-cached Finnhub extras — never fetch on load
                     const extras = {
                         sentiment: appState.sentimentCache[ticker] || null,
                         earnings: appState.earningsCache[ticker] || null,
@@ -745,38 +749,81 @@ ADX = Wilder-smoothed average of DX</span>
                 }
 
                 evaluateAlerts(ticker);
+                renderUI(); // Render each card as soon as its data arrives
+            }));
+            localStorage.setItem('indicators', JSON.stringify(appState.indicators));
+        }
 
-                // Render this card immediately without waiting for other tickers
-                renderUI();
-            });
+        // On-demand Finnhub fetch — called by "Check Sentiment" button on each card
+        async function checkSentiment(ticker) {
+            const btn = document.getElementById(`sentiment-btn-${ticker}`);
+            const panel = document.getElementById(`sentiment-panel-${ticker}`);
+            if (btn) { btn.textContent = 'Loading...'; btn.disabled = true; }
 
-            // Phase 2: after all chart data rendered, fetch Finnhub data in background
-            // — only for tickers we haven't fetched yet (not on every 60s refresh)
-            Promise.all(phase1).then(() => {
-                localStorage.setItem('indicators', JSON.stringify(appState.indicators));
+            const [sentiment, earnings] = await Promise.all([
+                fetchSentiment(ticker),
+                fetchEarnings(ticker)
+            ]);
 
-                const needsFinnhub = appState.watchlist.filter(
-                    t => !appState.sentimentCache[t] && !appState.earningsCache[t]
-                );
-                if (!needsFinnhub.length) return;
+            appState.sentimentCache[ticker] = sentiment;
+            appState.earningsCache[ticker] = earnings;
 
-                // Stagger Finnhub calls 200ms apart to stay within 60 req/min free tier limit
-                needsFinnhub.forEach((ticker, i) => {
-                    setTimeout(async () => {
-                        const [sentiment, earnings] = await Promise.all([
-                            fetchSentiment(ticker),
-                            fetchEarnings(ticker)
-                        ]);
-                        appState.sentimentCache[ticker] = sentiment;
-                        appState.earningsCache[ticker] = earnings;
-                        const cached = appState.dataCache[ticker];
-                        if (cached) {
-                            cached.computed = computeIndicatorSet(cached.prices, cached.ohlc, { sentiment, earnings });
-                            renderUI(); // Update just this card's signal panel
-                        }
-                    }, i * 200);
-                });
-            });
+            const cached = appState.dataCache[ticker];
+            if (cached) {
+                cached.computed = computeIndicatorSet(cached.prices, cached.ohlc, { sentiment, earnings });
+            }
+
+            // Update sentiment panel inline without full re-render
+            if (panel) {
+                panel.innerHTML = buildSentimentHTML(ticker, sentiment, earnings);
+            }
+
+            // Recompute and update signal panel inline
+            const sigPanel = document.getElementById(`signal-panel-${ticker}`);
+            if (sigPanel && cached) {
+                sigPanel.innerHTML = buildSignalInnerHTML(cached.computed.composite);
+            }
+
+            if (btn) { btn.textContent = '↻ Refresh Sentiment'; btn.disabled = false; }
+        }
+
+        function buildSentimentHTML(ticker, sentiment, earnings) {
+            let html = '';
+            if (!sentiment && !earnings) {
+                return `<span style="color:var(--text-sub);font-size:0.8rem;">No Finnhub data available for ${ticker}</span>`;
+            }
+            if (sentiment && sentiment.bullishPercent !== null) {
+                const diff = sentiment.bullishPercent - sentiment.bearishPercent;
+                const color = diff > 10 ? 'var(--buy-color)' : diff < -10 ? 'var(--sell-color)' : 'var(--text-sub)';
+                html += `<span style="color:${color};font-size:0.82rem;">📰 News: ${sentiment.bullishPercent}% bullish / ${sentiment.bearishPercent}% bearish</span>`;
+                if (sentiment.buzzScore !== null) html += ` &nbsp;•&nbsp; <span style="font-size:0.82rem;color:var(--text-sub);">Buzz: ${sentiment.buzzScore}</span>`;
+            }
+            if (earnings && earnings.nextEarningsDate) {
+                const warn = earnings.daysUntil <= 3 ? '⚠ ' : '';
+                html += `<br><span style="font-size:0.82rem;color:var(--text-sub);">${warn}Earnings: ${earnings.nextEarningsDate} (${earnings.daysUntil}d away${earnings.hour ? ', ' + earnings.hour : ''})</span>`;
+            }
+            return html;
+        }
+
+        function buildSignalInnerHTML(comp) {
+            const sigClass = comp.signal === 'BUY' ? 'buy' : comp.signal === 'SELL' ? 'sell' : 'hold';
+            return `
+                <div class="signal-header">
+                    <span class="badge ${sigClass}">${comp.signal}</span>
+                    <span class="confidence-bar-wrap">
+                        <span class="confidence-bar" style="width:${comp.confidence}%; background:${sigClass==='buy'?'var(--buy-color)':sigClass==='sell'?'var(--sell-color)':'var(--hold-color)'}"></span>
+                    </span>
+                    <span class="confidence-label">${comp.confidence}% confidence</span>
+                </div>
+                <ul class="signal-reasons">
+                    ${comp.reasons.map(r => `<li>${r}</li>`).join('')}
+                </ul>
+                ${comp.stopLoss !== null ? `
+                <div class="signal-levels">
+                    <span>Stop-loss: <strong>$${comp.stopLoss.toFixed(2)}</strong></span>
+                    <span>Target: <strong>$${comp.takeTarget.toFixed(2)}</strong></span>
+                    <span>ATR: ${comp.atr.toFixed(2)}</span>
+                </div>` : (comp.atr !== null ? `<div class="signal-levels"><span>ATR: ${comp.atr.toFixed(2)}</span></div>` : '')}`;
         }
 
         // --- Alert System Logic ---
@@ -882,24 +929,18 @@ ADX = Wilder-smoothed average of DX</span>
                         </div>`).join('');
                 }
 
+                const hasSentiment = !!appState.sentimentCache[ticker];
                 let signalHtml = `
-                    <div class="signal-panel">
-                        <div class="signal-header">
-                            <span class="badge ${sigClass}">${comp.signal}</span>
-                            <span class="confidence-bar-wrap">
-                                <span class="confidence-bar" style="width:${comp.confidence}%; background:${sigClass==='buy'?'var(--buy-color)':sigClass==='sell'?'var(--sell-color)':'var(--hold-color)'}"></span>
-                            </span>
-                            <span class="confidence-label">${comp.confidence}% confidence</span>
+                    <div class="signal-panel" id="signal-panel-${ticker}">
+                        ${buildSignalInnerHTML(comp)}
+                    </div>
+                    <div class="sentiment-row">
+                        <div class="sentiment-panel" id="sentiment-panel-${ticker}">
+                            ${hasSentiment ? buildSentimentHTML(ticker, appState.sentimentCache[ticker], appState.earningsCache[ticker]) : ''}
                         </div>
-                        <ul class="signal-reasons">
-                            ${comp.reasons.map(r => `<li>${r}</li>`).join('')}
-                        </ul>
-                        ${comp.stopLoss !== null ? `
-                        <div class="signal-levels">
-                            <span>Stop-loss: <strong>$${comp.stopLoss.toFixed(2)}</strong></span>
-                            <span>Target: <strong>$${comp.takeTarget.toFixed(2)}</strong></span>
-                            <span>ATR: ${comp.atr.toFixed(2)}</span>
-                        </div>` : (comp.atr !== null ? `<div class="signal-levels"><span>ATR: ${comp.atr.toFixed(2)} (no active trade levels — signal is HOLD)</span></div>` : '<div class="signal-levels"><span style="color:var(--text-sub)">OHLC data unavailable — ATR/ADX not computed</span></div>')}
+                        <button class="sentiment-btn" id="sentiment-btn-${ticker}" onclick="checkSentiment('${ticker}')">
+                            ${hasSentiment ? '↻ Refresh Sentiment' : '📰 Check Sentiment & Earnings'}
+                        </button>
                     </div>`;
 
                 html += `
