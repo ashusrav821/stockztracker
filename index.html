@@ -578,15 +578,37 @@ ADX = Wilder-smoothed average of DX</span>
 
         // --- API Data Fetching (via Cloudflare Worker proxy) ---
         async function fetchStockData(ticker) {
+            const cacheKey = `chart_${ticker}`;
+            const cached = sessionStorage.getItem(cacheKey);
+
+            // If we have a cached version, hydrate the state immediately for instant render,
+            // then fetch fresh data in the background and update if it differs.
+            let cachedData = null;
+            if (cached) {
+                try {
+                    cachedData = JSON.parse(cached);
+                    // Return cached data immediately — background refresh happens via the 60s interval
+                    if (appState.dataCache[ticker]) return cachedData; // already have live data this session
+                } catch(e) { sessionStorage.removeItem(cacheKey); }
+            }
+
             const res = await fetch(`${CONFIG.WORKER_BASE}/api/chart?ticker=${encodeURIComponent(ticker)}&range=1y&interval=1d`);
             if (!res.ok) {
                 let msg = `HTTP ${res.status}`;
                 try { const j = await res.json(); if(j.error) msg = j.error; } catch(e) {}
+                // Fall back to cached data if fetch fails
+                if (cachedData) return cachedData;
                 throw new Error(msg);
             }
             const data = await res.json();
-            if (!data.prices || !data.prices.length) throw new Error('No price data returned');
-            return { prices: data.prices, dates: data.dates, ohlc: data.ohlc || [] };
+            if (!data.prices || !data.prices.length) {
+                if (cachedData) return cachedData;
+                throw new Error('No price data returned');
+            }
+            const result = { prices: data.prices, dates: data.dates, ohlc: data.ohlc || [] };
+            // Cache for this session — lightweight (just prices/dates/ohlc, not computed indicators)
+            try { sessionStorage.setItem(cacheKey, JSON.stringify(result)); } catch(e) {}
+            return result;
         }
 
         async function fetchNews(ticker) {
@@ -600,18 +622,28 @@ ADX = Wilder-smoothed average of DX</span>
 
         // Sentiment/earnings change slowly — fetch once per session per ticker, cached in appState
         async function fetchSentiment(ticker) {
+            const cacheKey = `sentiment_${ticker}`;
+            const cached = sessionStorage.getItem(cacheKey);
+            if (cached) { try { return JSON.parse(cached); } catch(e) {} }
             try {
                 const res = await fetch(`${CONFIG.WORKER_BASE}/api/sentiment?ticker=${encodeURIComponent(ticker)}`);
                 if (!res.ok) return null;
-                return await res.json();
+                const data = await res.json();
+                try { sessionStorage.setItem(cacheKey, JSON.stringify(data)); } catch(e) {}
+                return data;
             } catch(e) { return null; }
         }
 
         async function fetchEarnings(ticker) {
+            const cacheKey = `earnings_${ticker}`;
+            const cached = sessionStorage.getItem(cacheKey);
+            if (cached) { try { return JSON.parse(cached); } catch(e) {} }
             try {
                 const res = await fetch(`${CONFIG.WORKER_BASE}/api/earnings?ticker=${encodeURIComponent(ticker)}`);
                 if (!res.ok) return null;
-                return await res.json();
+                const data = await res.json();
+                try { sessionStorage.setItem(cacheKey, JSON.stringify(data)); } catch(e) {}
+                return data;
             } catch(e) { return null; }
         }
 
@@ -692,12 +724,15 @@ ADX = Wilder-smoothed average of DX</span>
 
         // --- Core Application Loop ---
         async function updateData() {
-            await Promise.all(appState.watchlist.map(async ticker => {
+            // Phase 1: fetch chart data for all tickers concurrently, render each card as it arrives
+            // — don't wait for slow Finnhub calls before showing price/chart
+            const phase1 = appState.watchlist.map(async ticker => {
                 if(!appState.indicators[ticker]) appState.indicators[ticker] = {sma:false, sma20:false, ema20:false, bb:false, rsi:false, macd:false};
                 if(!appState.alerts[ticker]) appState.alerts[ticker] = [];
 
                 try {
                     const data = await fetchStockData(ticker);
+                    // Use already-cached extras so we don't recompute unnecessarily on 60s refresh
                     const extras = {
                         sentiment: appState.sentimentCache[ticker] || null,
                         earnings: appState.earningsCache[ticker] || null,
@@ -709,24 +744,39 @@ ADX = Wilder-smoothed average of DX</span>
                     appState.errors[ticker] = e.message || 'Failed to load';
                 }
 
-                if(appState.ui.news[ticker] && !appState.newsCache[ticker]) {
-                    appState.newsCache[ticker] = await fetchNews(ticker);
-                }
-
-                // Sentiment/earnings change slowly — fetch once per ticker, then recompute composite
-                if(!appState.sentimentCache[ticker] && !appState.earningsCache[ticker]) {
-                    const [sentiment, earnings] = await Promise.all([fetchSentiment(ticker), fetchEarnings(ticker)]);
-                    appState.sentimentCache[ticker] = sentiment;
-                    appState.earningsCache[ticker] = earnings;
-                    const cached = appState.dataCache[ticker];
-                    if (cached) {
-                        cached.computed = computeIndicatorSet(cached.prices, cached.ohlc, { sentiment, earnings });
-                    }
-                }
                 evaluateAlerts(ticker);
-            }));
-            localStorage.setItem('indicators', JSON.stringify(appState.indicators));
-            renderUI();
+
+                // Render this card immediately without waiting for other tickers
+                renderUI();
+            });
+
+            // Phase 2: after all chart data rendered, fetch Finnhub data in background
+            // — only for tickers we haven't fetched yet (not on every 60s refresh)
+            Promise.all(phase1).then(() => {
+                localStorage.setItem('indicators', JSON.stringify(appState.indicators));
+
+                const needsFinnhub = appState.watchlist.filter(
+                    t => !appState.sentimentCache[t] && !appState.earningsCache[t]
+                );
+                if (!needsFinnhub.length) return;
+
+                // Stagger Finnhub calls 200ms apart to stay within 60 req/min free tier limit
+                needsFinnhub.forEach((ticker, i) => {
+                    setTimeout(async () => {
+                        const [sentiment, earnings] = await Promise.all([
+                            fetchSentiment(ticker),
+                            fetchEarnings(ticker)
+                        ]);
+                        appState.sentimentCache[ticker] = sentiment;
+                        appState.earningsCache[ticker] = earnings;
+                        const cached = appState.dataCache[ticker];
+                        if (cached) {
+                            cached.computed = computeIndicatorSet(cached.prices, cached.ohlc, { sentiment, earnings });
+                            renderUI(); // Update just this card's signal panel
+                        }
+                    }, i * 200);
+                });
+            });
         }
 
         // --- Alert System Logic ---
@@ -1026,10 +1076,28 @@ ADX = Wilder-smoothed average of DX</span>
             })();
         }
 
-        // Initialize App
+        // Initialize App — pre-hydrate from sessionStorage for instant first paint
         document.getElementById('pinInput').value = appState.pin;
+        appState.watchlist.forEach(ticker => {
+            const raw = sessionStorage.getItem(`chart_${ticker}`);
+            if (raw) {
+                try {
+                    const data = JSON.parse(raw);
+                    const sentiment = JSON.parse(sessionStorage.getItem(`sentiment_${ticker}`) || 'null');
+                    const earnings = JSON.parse(sessionStorage.getItem(`earnings_${ticker}`) || 'null');
+                    if (sentiment) appState.sentimentCache[ticker] = sentiment;
+                    if (earnings) appState.earningsCache[ticker] = earnings;
+                    if(!appState.indicators[ticker]) appState.indicators[ticker] = {sma:false, sma20:false, ema20:false, bb:false, rsi:false, macd:false};
+                    data.computed = computeIndicatorSet(data.prices, data.ohlc, { sentiment, earnings });
+                    appState.dataCache[ticker] = data;
+                } catch(e) {}
+            }
+        });
+        // If we had cached data, render it immediately (before network)
+        if (Object.keys(appState.dataCache).length) renderUI();
+
         updateData();
-        setInterval(updateData, CONFIG.REFRESH_MS); // Background refresh
+        setInterval(updateData, CONFIG.REFRESH_MS);
     </script>
 </body>
 </html>
