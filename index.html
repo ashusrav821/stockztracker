@@ -7,143 +7,477 @@
     <meta name="theme-color" id="theme-meta" content="#000000">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
-        /* --- Default Dark Theme Variables --- */
+        /* --- Dark Theme --- */
         :root {
-            --bg-base: #000000; 
-            --header-bg: linear-gradient(180deg, #111 0%, #000 100%);
-            --card-bg: #151515; 
-            --card-border: #2a2a2a;
-            --text-main: #ffffff; 
-            --text-sub: #a0a0a0; 
-            --accent: #2997ff; 
-            --buy-color: #32d74b; 
-            --sell-color: #ff453a; 
-            --hold-color: #ffd60a;
-            --input-bg: #1c1c1e;
-            --input-border: #333333;
-            --hover-bg: #2a2a2a;
+            --bg-base: #0a0a0f;
+            --header-bg: #0a0a0f;
+            --card-bg: #111118;
+            --card-border: #1e1e2a;
+            --text-main: #f0f0f8;
+            --text-sub: #6b6b80;
+            --text-mid: #9898b0;
+            --accent: #6c63ff;
+            --accent-dim: rgba(108, 99, 255, 0.12);
+            --buy-color: #00d395;
+            --buy-dim: rgba(0, 211, 149, 0.12);
+            --sell-color: #ff5c5c;
+            --sell-dim: rgba(255, 92, 92, 0.12);
+            --hold-color: #f5a623;
+            --hold-dim: rgba(245, 166, 35, 0.12);
+            --input-bg: #16161f;
+            --input-border: #2a2a3a;
+            --hover-bg: #1a1a26;
+            --divider: #1e1e2a;
+            --stripe-buy: var(--buy-color);
+            --stripe-sell: var(--sell-color);
+            --stripe-hold: var(--hold-color);
         }
 
-        /* --- Light Theme Variables --- */
+        /* --- Light Theme --- */
         body.light-mode {
-            --bg-base: #f2f2f7; 
-            --header-bg: linear-gradient(180deg, #ffffff 0%, #f2f2f7 100%);
-            --card-bg: #ffffff; 
-            --card-border: #e5e5ea;
-            --text-main: #000000; 
-            --text-sub: #8e8e93; 
-            --accent: #007aff;
-            --input-bg: #f2f2f7;
-            --input-border: #d1d1d6;
-            --hover-bg: #e5e5ea;
+            --bg-base: #f4f4f8;
+            --header-bg: #ffffff;
+            --card-bg: #ffffff;
+            --card-border: #e8e8f0;
+            --text-main: #0f0f1a;
+            --text-sub: #9090a8;
+            --text-mid: #6060788;
+            --accent: #5b54e8;
+            --accent-dim: rgba(91, 84, 232, 0.08);
+            --buy-color: #00b87c;
+            --buy-dim: rgba(0, 184, 124, 0.08);
+            --sell-color: #e84040;
+            --sell-dim: rgba(232, 64, 64, 0.08);
+            --hold-color: #d4880a;
+            --hold-dim: rgba(212, 136, 10, 0.08);
+            --input-bg: #f4f4f8;
+            --input-border: #dcdce8;
+            --hover-bg: #ebebf4;
+            --divider: #e8e8f0;
         }
 
         * { box-sizing: border-box; outline: none; -webkit-tap-highlight-color: transparent; }
 
         body {
-            margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-            background-color: var(--bg-base); color: var(--text-main); display: flex; flex-direction: column; height: 100vh;
-            transition: background-color 0.3s, color 0.3s;
+            margin: 0;
+            font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, sans-serif;
+            background-color: var(--bg-base);
+            color: var(--text-main);
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+            font-variant-numeric: tabular-nums;
         }
 
+        /* ---- HEADER ---- */
         header {
-            padding: 40px 20px 20px 20px; background: var(--header-bg);
-            border-bottom: 1px solid var(--card-border); position: sticky; top: 0; z-index: 100;
+            padding: 52px 18px 0;
+            background: var(--header-bg);
+            border-bottom: 1px solid var(--divider);
+            position: sticky;
+            top: 0;
+            z-index: 100;
         }
-        
-        .header-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; }
-        h1 { margin: 0; font-size: 1.8rem; font-weight: 700; letter-spacing: -0.5px; }
-        .theme-toggle { background: transparent; border: none; font-size: 1.5rem; cursor: pointer; padding: 0; }
 
-        .search-bar { display: flex; gap: 8px; }
-        .search-bar input { flex: 1; padding: 14px 16px; font-size: 1rem; background-color: var(--input-bg); border: 1px solid var(--card-border); color: var(--text-main); border-radius: 12px; text-transform: uppercase; transition: 0.3s; }
-        .search-bar button { padding: 0 20px; font-size: 1rem; font-weight: 600; background-color: var(--accent); color: white; border: none; border-radius: 12px; cursor: pointer; }
+        .header-top {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 16px;
+        }
 
-        main { flex: 1; overflow-y: auto; padding: 20px; }
-        .stock-card { background-color: var(--card-bg); border: 1px solid var(--card-border); border-radius: 16px; margin-bottom: 16px; padding: 16px; transition: 0.3s; }
-        .card-top { display: flex; justify-content: space-between; align-items: flex-start; }
-        .ticker { font-size: 1.4rem; font-weight: 700; margin: 0; }
-        .price { font-size: 1.4rem; font-weight: 700; margin: 0; text-align: right; }
-        .stats-row { margin-top: 8px; font-size: 0.85rem; color: var(--text-sub); }
+        h1 {
+            margin: 0;
+            font-size: 1.5rem;
+            font-weight: 800;
+            letter-spacing: -0.6px;
+            color: var(--text-main);
+        }
 
-        .badge { padding: 4px 10px; border-radius: 20px; font-weight: 600; font-size: 0.75rem; text-transform: uppercase; }
-        .badge.buy { background: rgba(50, 215, 75, 0.15); color: var(--buy-color); border: 1px solid rgba(50, 215, 75, 0.3); }
-        .badge.sell { background: rgba(255, 69, 58, 0.15); color: var(--sell-color); border: 1px solid rgba(255, 69, 58, 0.3); }
-        .badge.hold { background: rgba(255, 214, 10, 0.15); color: var(--hold-color); border: 1px solid rgba(255, 214, 10, 0.3); }
+        .header-actions { display: flex; align-items: center; gap: 10px; }
 
-        .actions { display: flex; justify-content: space-between; align-items: center; margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--card-border); }
-        .icon-btn { background: transparent; border: none; color: var(--text-sub); font-size: 0.9rem; font-weight: 500; cursor: pointer; display: flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 8px; transition: background 0.2s; }
-        .icon-btn.active, .icon-btn:hover { background: var(--hover-bg); color: var(--text-main); }
+        .theme-toggle {
+            background: var(--input-bg);
+            border: 1px solid var(--input-border);
+            font-size: 1rem;
+            cursor: pointer;
+            padding: 6px 10px;
+            border-radius: 10px;
+            line-height: 1;
+        }
 
-        /* Panels (Chart, News, Alerts) */
-        .panel { display: none; margin-top: 16px; border-top: 1px solid var(--card-border); padding-top: 12px; }
-        .panel.active { display: block; }
-        
-        /* Chart specific */
-        .canvas-wrapper { height: 250px; width: 100%; }
-        .indicator-toggles { display: flex; gap: 8px; margin-bottom: 12px; overflow-x: auto; padding-bottom: 4px; }
-        .indicator-toggles::-webkit-scrollbar { display: none; }
-        .ind-btn { background: var(--input-bg); border: 1px solid var(--input-border); color: var(--text-sub); padding: 6px 12px; border-radius: 12px; font-size: 0.8rem; cursor: pointer; white-space: nowrap; font-weight: 600; transition: 0.3s; }
-        .ind-btn.active { border-color: var(--accent); color: var(--accent); background: rgba(41, 151, 255, 0.1); }
-
-        /* News specific */
-        .news-item { padding: 10px 0; border-bottom: 1px solid var(--card-border); }
-        .news-item:last-child { border-bottom: none; }
-        .news-item a { color: var(--text-main); text-decoration: none; font-size: 0.95rem; font-weight: 500; display: block; margin-bottom: 4px; }
-        .news-date { font-size: 0.75rem; color: var(--text-sub); }
-
-        /* Alerts specific */
-        .alert-form { display: flex; gap: 8px; margin-top: 10px; }
-        .alert-form select, .alert-form input { background: var(--input-bg); color: var(--text-main); border: 1px solid var(--input-border); padding: 8px; border-radius: 8px; font-size: 0.85rem; }
-        .alert-form input { flex: 1; min-width: 0; }
-        .alert-form button { background: var(--accent); color: white; border: none; padding: 8px 12px; border-radius: 8px; font-weight: bold; cursor: pointer; }
-        .active-alert { display: flex; justify-content: space-between; align-items: center; background: var(--input-bg); padding: 8px 12px; border-radius: 8px; margin-bottom: 8px; font-size: 0.85rem; border-left: 3px solid var(--accent); }
-        .del-alert { background: transparent; color: var(--sell-color); border: none; cursor: pointer; font-weight: bold; }
-
-        /* Composite Signal Panel */
-        .signal-panel { background: var(--input-bg); border-radius: 12px; padding: 12px 14px; margin: 4px 0 12px; }
-        .signal-header { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
-        .confidence-bar-wrap { flex: 1; height: 6px; background: var(--card-border); border-radius: 4px; overflow: hidden; }
-        .confidence-bar { display: block; height: 100%; border-radius: 4px; transition: width 0.3s ease; }
-        .confidence-label { font-size: 0.75rem; color: var(--text-sub); white-space: nowrap; }
-        .signal-reasons { margin: 0; padding-left: 18px; font-size: 0.8rem; color: var(--text-sub); }
-        .signal-reasons li { margin-bottom: 2px; }
-        .signal-levels { display: flex; gap: 16px; flex-wrap: wrap; margin-top: 8px; font-size: 0.8rem; color: var(--text-sub); }
-        .signal-levels strong { color: var(--text-main); }
-
-        /* Sentiment row */
-        .sentiment-row { display: flex; align-items: flex-start; gap: 10px; margin: -6px 0 12px; flex-wrap: wrap; }
-        .sentiment-panel { flex: 1; min-width: 0; font-size: 0.82rem; color: var(--text-sub); padding-top: 2px; }
-        .sentiment-btn { white-space: nowrap; font-size: 0.78rem; font-weight: 600; background: var(--input-bg); color: var(--text-sub); border: 1px solid var(--card-border); border-radius: 8px; padding: 6px 12px; cursor: pointer; flex-shrink: 0; }
-        .sentiment-btn:disabled { opacity: 0.5; cursor: default; }
+        /* Search */
+        .search-bar { display: flex; gap: 8px; margin-bottom: 10px; }
+        .search-bar input {
+            flex: 1;
+            padding: 12px 14px;
+            font-size: 0.95rem;
+            font-weight: 600;
+            letter-spacing: 0.5px;
+            background: var(--input-bg);
+            border: 1px solid var(--input-border);
+            color: var(--text-main);
+            border-radius: 12px;
+            text-transform: uppercase;
+        }
+        .search-bar input::placeholder { font-weight: 400; letter-spacing: 0; text-transform: none; color: var(--text-sub); }
+        .search-bar input:focus { border-color: var(--accent); background: var(--hover-bg); }
+        .search-bar button {
+            padding: 0 18px;
+            font-size: 0.9rem;
+            font-weight: 700;
+            background: var(--accent);
+            color: white;
+            border: none;
+            border-radius: 12px;
+            cursor: pointer;
+            letter-spacing: 0.3px;
+        }
 
         /* Sync / PIN */
-        .sync-row { display: flex; gap: 8px; margin-top: 10px; align-items: center; }
-        .sync-row input { flex: 1; padding: 10px 14px; font-size: 0.95rem; background-color: var(--input-bg); border: 1px solid var(--card-border); color: var(--text-main); border-radius: 10px; letter-spacing: 2px; }
-        .sync-row button { padding: 0 16px; font-size: 0.85rem; font-weight: 600; background-color: var(--input-bg); color: var(--text-main); border: 1px solid var(--input-border); border-radius: 10px; cursor: pointer; }
-        .sync-row button.primary { background-color: var(--accent); color: white; border: none; }
-        .sync-status { font-size: 0.75rem; color: var(--text-sub); margin-top: 6px; min-height: 1em; }
+        .sync-row { display: flex; gap: 8px; margin-bottom: 6px; align-items: center; }
+        .sync-row input {
+            flex: 1;
+            padding: 10px 14px;
+            font-size: 0.88rem;
+            background: var(--input-bg);
+            border: 1px solid var(--input-border);
+            color: var(--text-main);
+            border-radius: 10px;
+            letter-spacing: 3px;
+        }
+        .sync-row input::placeholder { letter-spacing: 0; font-size: 0.82rem; color: var(--text-sub); }
+        .sync-row button {
+            padding: 10px 14px;
+            font-size: 0.82rem;
+            font-weight: 700;
+            background: var(--input-bg);
+            color: var(--text-mid);
+            border: 1px solid var(--input-border);
+            border-radius: 10px;
+            cursor: pointer;
+        }
+        .sync-row button.primary { background: var(--accent); color: white; border-color: transparent; }
+        .sync-status { font-size: 0.72rem; color: var(--text-sub); min-height: 14px; padding-bottom: 2px; }
         .sync-status.error { color: var(--sell-color); }
         .sync-status.ok { color: var(--buy-color); }
 
         /* Tabs */
-        .tab-row { display: flex; gap: 8px; margin-top: 12px; border-bottom: 1px solid var(--card-border); }
-        .tab-btn { flex: 1; padding: 10px 0; background: none; border: none; color: var(--text-sub); font-size: 0.9rem; font-weight: 600; cursor: pointer; border-bottom: 2px solid transparent; }
-        .tab-btn.active { color: var(--text-main); border-bottom: 2px solid var(--accent); }
+        .tab-row { display: flex; gap: 0; margin-top: 4px; }
+        .tab-btn {
+            flex: 1;
+            padding: 12px 0 10px;
+            background: none;
+            border: none;
+            border-bottom: 2px solid transparent;
+            color: var(--text-sub);
+            font-size: 0.85rem;
+            font-weight: 600;
+            cursor: pointer;
+            letter-spacing: 0.2px;
+            transition: color 0.2s;
+        }
+        .tab-btn.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+        /* ---- MAIN ---- */
+        main { flex: 1; overflow-y: auto; padding: 14px; }
+
+        /* ---- CARD ---- */
+        .stock-card {
+            background: var(--card-bg);
+            border: 1px solid var(--card-border);
+            border-radius: 18px;
+            margin-bottom: 12px;
+            overflow: hidden;
+            position: relative;
+        }
+
+        /* Signature: left accent stripe by signal */
+        .stock-card::before {
+            content: '';
+            position: absolute;
+            left: 0; top: 0; bottom: 0;
+            width: 3px;
+            border-radius: 18px 0 0 18px;
+        }
+        .stock-card.sig-buy::before { background: var(--buy-color); }
+        .stock-card.sig-sell::before { background: var(--sell-color); }
+        .stock-card.sig-hold::before { background: var(--hold-color); }
+
+        .card-inner { padding: 14px 14px 0 18px; }
+
+        /* Card top row */
+        .card-top {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 2px;
+        }
+
+        .card-left { display: flex; flex-direction: column; gap: 2px; }
+        .card-right { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
+
+        .ticker {
+            font-size: 1.25rem;
+            font-weight: 800;
+            margin: 0;
+            letter-spacing: -0.3px;
+            line-height: 1;
+        }
+        .company-meta { font-size: 0.72rem; color: var(--text-sub); }
+
+        .price {
+            font-size: 1.35rem;
+            font-weight: 800;
+            margin: 0;
+            letter-spacing: -0.5px;
+            line-height: 1;
+        }
+        .price-change {
+            font-size: 0.72rem;
+            font-weight: 600;
+            color: var(--text-sub);
+        }
+
+        /* Stats row */
+        .stats-row {
+            display: flex;
+            gap: 14px;
+            margin: 8px 0 0;
+            padding: 8px 0;
+            border-top: 1px solid var(--divider);
+        }
+        .stat-item { display: flex; flex-direction: column; gap: 1px; }
+        .stat-label { font-size: 0.62rem; color: var(--text-sub); text-transform: uppercase; letter-spacing: 0.5px; font-weight: 600; }
+        .stat-value { font-size: 0.8rem; font-weight: 700; color: var(--text-main); }
+
+        /* Badge */
+        .badge {
+            padding: 3px 9px;
+            border-radius: 20px;
+            font-weight: 700;
+            font-size: 0.68rem;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .badge.buy { background: var(--buy-dim); color: var(--buy-color); }
+        .badge.sell { background: var(--sell-dim); color: var(--sell-color); }
+        .badge.hold { background: var(--hold-dim); color: var(--hold-color); }
+
+        /* Action row */
+        .actions {
+            display: flex;
+            border-top: 1px solid var(--divider);
+            margin: 10px 0 0;
+        }
+        .icon-btn {
+            flex: 1;
+            background: transparent;
+            border: none;
+            border-right: 1px solid var(--divider);
+            color: var(--text-sub);
+            font-size: 0.75rem;
+            font-weight: 600;
+            cursor: pointer;
+            padding: 10px 4px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 3px;
+            transition: background 0.15s, color 0.15s;
+        }
+        .icon-btn:last-child { border-right: none; }
+        .icon-btn .icon-glyph { font-size: 1rem; line-height: 1; }
+        .icon-btn.active { color: var(--accent); background: var(--accent-dim); }
+        .icon-btn:active { background: var(--hover-bg); }
+
+        /* Panels */
+        .panel { display: none; padding: 12px 14px 14px 18px; border-top: 1px solid var(--divider); }
+        .panel.active { display: block; }
+
+        /* Chart */
+        .canvas-wrapper { height: 220px; width: 100%; }
+        .indicator-toggles {
+            display: flex;
+            gap: 6px;
+            margin-bottom: 10px;
+            overflow-x: auto;
+            padding-bottom: 2px;
+            -ms-overflow-style: none;
+            scrollbar-width: none;
+        }
+        .indicator-toggles::-webkit-scrollbar { display: none; }
+        .ind-btn {
+            background: var(--input-bg);
+            border: 1px solid var(--input-border);
+            color: var(--text-sub);
+            padding: 5px 11px;
+            border-radius: 20px;
+            font-size: 0.73rem;
+            font-weight: 700;
+            cursor: pointer;
+            white-space: nowrap;
+            letter-spacing: 0.2px;
+            transition: all 0.15s;
+        }
+        .ind-btn.active {
+            border-color: var(--accent);
+            color: var(--accent);
+            background: var(--accent-dim);
+        }
+
+        /* News */
+        .news-item { padding: 10px 0; border-bottom: 1px solid var(--divider); }
+        .news-item:last-child { border-bottom: none; }
+        .news-item a {
+            color: var(--text-main);
+            text-decoration: none;
+            font-size: 0.88rem;
+            font-weight: 600;
+            display: block;
+            margin-bottom: 4px;
+            line-height: 1.4;
+        }
+        .news-date { font-size: 0.7rem; color: var(--text-sub); }
+
+        /* Alerts */
+        .alert-form { display: flex; gap: 6px; margin-top: 10px; flex-wrap: wrap; }
+        .alert-form select, .alert-form input {
+            background: var(--input-bg);
+            color: var(--text-main);
+            border: 1px solid var(--input-border);
+            padding: 8px 10px;
+            border-radius: 10px;
+            font-size: 0.82rem;
+        }
+        .alert-form input { flex: 1; min-width: 80px; }
+        .alert-form button {
+            background: var(--accent);
+            color: white;
+            border: none;
+            padding: 8px 14px;
+            border-radius: 10px;
+            font-weight: 700;
+            cursor: pointer;
+            font-size: 0.82rem;
+        }
+        .active-alert {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background: var(--input-bg);
+            padding: 8px 12px;
+            border-radius: 10px;
+            margin-bottom: 6px;
+            font-size: 0.82rem;
+            border-left: 3px solid var(--accent);
+        }
+        .del-alert { background: transparent; color: var(--sell-color); border: none; cursor: pointer; font-weight: 700; }
+
+        /* Signal panel */
+        .signal-panel {
+            background: var(--input-bg);
+            border-radius: 12px;
+            padding: 12px 14px;
+            margin: 10px 14px 10px 18px;
+        }
+        .signal-header { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+        .confidence-bar-wrap {
+            flex: 1;
+            height: 4px;
+            background: var(--divider);
+            border-radius: 4px;
+            overflow: hidden;
+        }
+        .confidence-bar { display: block; height: 100%; border-radius: 4px; transition: width 0.4s ease; }
+        .confidence-label { font-size: 0.7rem; color: var(--text-sub); white-space: nowrap; font-weight: 600; }
+        .signal-reasons { margin: 0; padding-left: 16px; font-size: 0.77rem; color: var(--text-sub); line-height: 1.7; }
+        .signal-levels {
+            display: flex;
+            gap: 12px;
+            flex-wrap: wrap;
+            margin-top: 8px;
+            padding-top: 8px;
+            border-top: 1px solid var(--divider);
+            font-size: 0.75rem;
+            color: var(--text-sub);
+        }
+        .signal-levels strong { color: var(--text-main); font-weight: 700; }
+
+        /* Sentiment */
+        .sentiment-row {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 8px 14px 10px 18px;
+            flex-wrap: wrap;
+        }
+        .sentiment-panel { flex: 1; min-width: 0; font-size: 0.78rem; color: var(--text-sub); line-height: 1.5; }
+        .sentiment-btn {
+            white-space: nowrap;
+            font-size: 0.73rem;
+            font-weight: 700;
+            background: var(--input-bg);
+            color: var(--text-sub);
+            border: 1px solid var(--input-border);
+            border-radius: 20px;
+            padding: 5px 12px;
+            cursor: pointer;
+            flex-shrink: 0;
+            letter-spacing: 0.2px;
+        }
+        .sentiment-btn:disabled { opacity: 0.4; cursor: default; }
+
+        /* Info / error cards */
+        .info-card {
+            background: var(--card-bg);
+            border: 1px solid var(--card-border);
+            border-radius: 16px;
+            margin-bottom: 12px;
+            padding: 20px;
+            text-align: center;
+            color: var(--text-sub);
+            font-size: 0.88rem;
+        }
+        .info-card.error-card { border-color: rgba(255, 92, 92, 0.25); color: var(--sell-color); }
+        .retry-btn {
+            margin-top: 10px;
+            background: var(--input-bg);
+            color: var(--text-main);
+            border: 1px solid var(--input-border);
+            padding: 7px 16px;
+            border-radius: 10px;
+            cursor: pointer;
+            font-size: 0.8rem;
+            font-weight: 600;
+        }
 
         /* Guide */
-        .guide-section { background-color: var(--card-bg); border: 1px solid var(--card-border); border-radius: 16px; margin-bottom: 14px; padding: 16px; }
-        .guide-section h3 { margin: 0 0 6px 0; font-size: 1rem; }
-        .guide-section p { margin: 0 0 8px 0; font-size: 0.85rem; color: var(--text-sub); line-height: 1.5; }
+        .guide-section {
+            background: var(--card-bg);
+            border: 1px solid var(--card-border);
+            border-radius: 16px;
+            margin-bottom: 10px;
+            padding: 16px;
+        }
+        .guide-section h3 { margin: 0 0 6px; font-size: 0.95rem; font-weight: 700; letter-spacing: -0.2px; }
+        .guide-section p { margin: 0 0 8px; font-size: 0.82rem; color: var(--text-sub); line-height: 1.55; }
         .guide-section p:last-child { margin-bottom: 0; }
-        .guide-section .guide-formula { font-family: monospace; font-size: 0.78rem; background: var(--input-bg); padding: 8px 10px; border-radius: 8px; display: block; margin: 6px 0; color: var(--text-main); overflow-x: auto; }
-        .guide-section ul { margin: 6px 0; padding-left: 20px; font-size: 0.85rem; color: var(--text-sub); line-height: 1.6; }
+        .guide-formula {
+            font-family: "SF Mono", "Fira Code", Menlo, monospace;
+            font-size: 0.72rem;
+            background: var(--input-bg);
+            padding: 10px 12px;
+            border-radius: 10px;
+            display: block;
+            margin: 8px 0;
+            color: var(--accent);
+            overflow-x: auto;
+            white-space: pre;
+            border-left: 2px solid var(--accent);
+        }
+        .guide-section ul { margin: 6px 0; padding-left: 18px; font-size: 0.82rem; color: var(--text-sub); line-height: 1.65; }
         .guide-section li strong { color: var(--text-main); }
-
-        /* Error / loading card */
-        .info-card { background-color: var(--card-bg); border: 1px solid var(--card-border); border-radius: 16px; margin-bottom: 16px; padding: 16px; text-align: center; color: var(--text-sub); font-size: 0.9rem; }
-        .info-card.error-card { border-color: rgba(255, 69, 58, 0.3); color: var(--sell-color); }
-        .retry-btn { margin-top: 8px; background: var(--input-bg); color: var(--text-main); border: 1px solid var(--input-border); padding: 6px 14px; border-radius: 8px; cursor: pointer; font-size: 0.8rem; }
     </style>
 </head>
 <body>
@@ -933,33 +1267,62 @@ ADX = Wilder-smoothed average of DX</span>
                 let signalHtml = `
                     <div class="signal-panel" id="signal-panel-${ticker}">
                         ${buildSignalInnerHTML(comp)}
-                    </div>
-                    <div class="sentiment-row">
-                        <div class="sentiment-panel" id="sentiment-panel-${ticker}">
-                            ${hasSentiment ? buildSentimentHTML(ticker, appState.sentimentCache[ticker], appState.earningsCache[ticker]) : ''}
-                        </div>
-                        <button class="sentiment-btn" id="sentiment-btn-${ticker}" onclick="checkSentiment('${ticker}')">
-                            ${hasSentiment ? '↻ Refresh Sentiment' : '📰 Check Sentiment & Earnings'}
-                        </button>
                     </div>`;
 
                 html += `
-                    <div class="stock-card">
-                        <div class="card-top">
-                            <div><h2 class="ticker">${ticker}</h2><div class="stats-row"><span>RSI: ${rsi} &nbsp;•&nbsp; SMA: $${sma}</span></div></div>
-                            <div style="text-align: right;"><h2 class="price" style="color: ${isBullish ? 'var(--buy-color)' : 'var(--sell-color)'}">$${currentPrice.toFixed(2)}</h2><span class="badge ${sigClass}">${comp.signal}</span></div>
+                    <div class="stock-card sig-${sigClass}">
+                        <div class="card-inner">
+                            <div class="card-top">
+                                <div class="card-left">
+                                    <h2 class="ticker">${ticker}</h2>
+                                    <span class="company-meta">RSI ${rsi} &nbsp;·&nbsp; SMA $${sma}</span>
+                                </div>
+                                <div class="card-right">
+                                    <h2 class="price" style="color:${isBullish ? 'var(--buy-color)' : 'var(--sell-color)'}">$${currentPrice.toFixed(2)}</h2>
+                                    <span class="badge ${sigClass}">${comp.signal}</span>
+                                </div>
+                            </div>
+
+                            <div class="stats-row">
+                                <div class="stat-item">
+                                    <span class="stat-label">ADX</span>
+                                    <span class="stat-value">${comp.atr !== null && data.computed.adx ? data.computed.adx.adx[data.computed.adx.adx.length-1].toFixed(1) : '—'}</span>
+                                </div>
+                                <div class="stat-item">
+                                    <span class="stat-label">ATR</span>
+                                    <span class="stat-value">${comp.atr !== null ? comp.atr.toFixed(2) : '—'}</span>
+                                </div>
+                                <div class="stat-item">
+                                    <span class="stat-label">Conf.</span>
+                                    <span class="stat-value">${comp.confidence}%</span>
+                                </div>
+                                <div class="stat-item">
+                                    <span class="stat-label">Trend</span>
+                                    <span class="stat-value" style="color:${comp.trendStrength === 'strong' ? 'var(--buy-color)' : 'var(--text-sub)'}">${comp.trendStrength === 'strong' ? 'Strong' : 'Weak'}</span>
+                                </div>
+                            </div>
                         </div>
 
                         <!-- Signal Detail -->
                         ${signalHtml}
 
+                        <!-- Sentiment -->
+                        <div class="sentiment-row">
+                            <div class="sentiment-panel" id="sentiment-panel-${ticker}">
+                                ${hasSentiment ? buildSentimentHTML(ticker, appState.sentimentCache[ticker], appState.earningsCache[ticker]) : ''}
+                            </div>
+                            <button class="sentiment-btn" id="sentiment-btn-${ticker}" onclick="checkSentiment('${ticker}')">
+                                ${hasSentiment ? '↻ Refresh' : '📰 Sentiment'}
+                            </button>
+                        </div>
+
                         <!-- Panel: CHART -->
                         <div class="panel chart-container ${ui.charts[ticker] ? 'active' : ''}">
                             <div class="indicator-toggles">
-                                <button class="ind-btn ${inds.sma?'active':''}" onclick="toggleUI('${ticker}', 'ind', 'sma')">SMA (50)</button>
-                                <button class="ind-btn ${inds.sma20?'active':''}" onclick="toggleUI('${ticker}', 'ind', 'sma20')">SMA (20)</button>
-                                <button class="ind-btn ${inds.ema20?'active':''}" onclick="toggleUI('${ticker}', 'ind', 'ema20')">EMA (20)</button>
-                                <button class="ind-btn ${inds.bb?'active':''}" onclick="toggleUI('${ticker}', 'ind', 'bb')">Bollinger Bands</button>
+                                <button class="ind-btn ${inds.sma?'active':''}" onclick="toggleUI('${ticker}', 'ind', 'sma')">SMA 50</button>
+                                <button class="ind-btn ${inds.sma20?'active':''}" onclick="toggleUI('${ticker}', 'ind', 'sma20')">SMA 20</button>
+                                <button class="ind-btn ${inds.ema20?'active':''}" onclick="toggleUI('${ticker}', 'ind', 'ema20')">EMA 20</button>
+                                <button class="ind-btn ${inds.bb?'active':''}" onclick="toggleUI('${ticker}', 'ind', 'bb')">BB</button>
                                 <button class="ind-btn ${inds.rsi?'active':''}" onclick="toggleUI('${ticker}', 'ind', 'rsi')">RSI</button>
                                 <button class="ind-btn ${inds.macd?'active':''}" onclick="toggleUI('${ticker}', 'ind', 'macd')">MACD</button>
                             </div>
@@ -972,20 +1335,28 @@ ADX = Wilder-smoothed average of DX</span>
                         <!-- Panel: ALERTS -->
                         <div class="panel ${ui.alerts[ticker] ? 'active' : ''}">
                             <div style="margin-bottom:10px;">${alertsHtml}</div>
-                            <div style="font-size:0.85rem; color:var(--text-sub);">Create new alert:</div>
+                            <div style="font-size:0.78rem; color:var(--text-sub); margin-bottom:6px; font-weight:600; text-transform:uppercase; letter-spacing:0.4px;">New Alert</div>
                             <div class="alert-form">
                                 <select id="alt-ind-${ticker}"><option value="Price">Price</option><option value="RSI">RSI</option><option value="SMA">SMA 50</option></select>
-                                <select id="alt-cond-${ticker}"><option value=">">Above (>)</option><option value="<">Below (<)</option></select>
+                                <select id="alt-cond-${ticker}"><option value=">">Above</option><option value="<">Below</option></select>
                                 <input type="number" id="alt-val-${ticker}" placeholder="Value">
-                                <button onclick="addCustomAlert('${ticker}')">Save</button>
+                                <button onclick="addCustomAlert('${ticker}')">Set</button>
                             </div>
                         </div>
 
                         <div class="actions">
-                            <button class="icon-btn ${ui.charts[ticker]?'active':''}" onclick="toggleUI('${ticker}', 'panel', 'charts')">📈 <span>Chart</span></button>
-                            <button class="icon-btn ${ui.news[ticker]?'active':''}" onclick="toggleUI('${ticker}', 'panel', 'news')">📰 <span>News</span></button>
-                            <button class="icon-btn ${ui.alerts[ticker]?'active':''}" onclick="toggleUI('${ticker}', 'panel', 'alerts')">🔔 <span>Alerts</span></button>
-                            <button class="icon-btn" onclick="deleteStock('${ticker}')">✕ <span>Del</span></button>
+                            <button class="icon-btn ${ui.charts[ticker]?'active':''}" onclick="toggleUI('${ticker}', 'panel', 'charts')">
+                                <span class="icon-glyph">📈</span><span>Chart</span>
+                            </button>
+                            <button class="icon-btn ${ui.news[ticker]?'active':''}" onclick="toggleUI('${ticker}', 'panel', 'news')">
+                                <span class="icon-glyph">📰</span><span>News</span>
+                            </button>
+                            <button class="icon-btn ${ui.alerts[ticker]?'active':''}" onclick="toggleUI('${ticker}', 'panel', 'alerts')">
+                                <span class="icon-glyph">🔔</span><span>Alerts</span>
+                            </button>
+                            <button class="icon-btn" onclick="deleteStock('${ticker}')">
+                                <span class="icon-glyph">✕</span><span>Remove</span>
+                            </button>
                         </div>
                     </div>
                 `;
@@ -1006,11 +1377,11 @@ ADX = Wilder-smoothed average of DX</span>
             
             // EXPLICIT COLORS: Fixes the "black lines in dark mode" bug in Chart.js
             const isLight = document.body.classList.contains('light-mode');
-            const cBuy = '#32d74b';
-            const cSell = '#ff453a';
+            const cBuy = '#00d395';
+            const cSell = '#ff5c5c';
             const cSma = '#f5a623';
             const cSma20 = '#5ac8fa';
-            const cEma20 = '#bf5af2';
+            const cEma20 = '#a78bfa';
             const cBb = isLight ? 'rgba(0, 0, 0, 0.2)' : 'rgba(255, 255, 255, 0.3)';
             const cRsi = '#b58900';
             const cMacd = '#d33682';
