@@ -404,30 +404,6 @@
         }
         .signal-levels strong { color: var(--text-main); font-weight: 700; }
 
-        /* Sentiment */
-        .sentiment-row {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            padding: 8px 14px 10px 18px;
-            flex-wrap: wrap;
-        }
-        .sentiment-panel { flex: 1; min-width: 0; font-size: 0.78rem; color: var(--text-sub); line-height: 1.5; }
-        .sentiment-btn {
-            white-space: nowrap;
-            font-size: 0.73rem;
-            font-weight: 700;
-            background: var(--input-bg);
-            color: var(--text-sub);
-            border: 1px solid var(--input-border);
-            border-radius: 20px;
-            padding: 5px 12px;
-            cursor: pointer;
-            flex-shrink: 0;
-            letter-spacing: 0.2px;
-        }
-        .sentiment-btn:disabled { opacity: 0.4; cursor: default; }
-
         /* Info / error cards */
         .info-card {
             background: var(--card-bg);
@@ -593,53 +569,14 @@ Signal line = EMA(9) of MACD line</span>
                 </div>
 
                 <div class="guide-section">
-                    <h3>ATR — Average True Range</h3>
-                    <p>Measures volatility (how much a stock typically moves per day), regardless of direction. Higher ATR = larger typical price swings. Used here to size stop-loss and target levels proportionally to current volatility.</p>
-                    <span class="guide-formula">True Range = max(
-  high − low,
-  |high − previous close|,
-  |low − previous close|
-)
-ATR(14) = Wilder-smoothed average of True Range</span>
-                </div>
-
-                <div class="guide-section">
-                    <h3>ADX &amp; DI+/DI− — Trend Strength &amp; Direction</h3>
-                    <p>ADX measures how strong a trend is (not its direction) on a 0–100 scale — above 25 generally indicates a strong trend, below 25 indicates a weak/ranging market where trend-following signals are less reliable. DI+ above DI− indicates upward pressure; DI− above DI+ indicates downward pressure.</p>
-                    <span class="guide-formula">+DI, −DI = smoothed directional movement / smoothed True Range, ×100
-DX = 100 × |+DI − −DI| / (+DI + −DI)
-ADX = Wilder-smoothed average of DX</span>
-                </div>
-
-                <div class="guide-section">
-                    <h3>News Sentiment (Finnhub)</h3>
-                    <p>Bullish vs bearish percentage derived from recent news coverage of the company. A gap of more than 10 points in either direction is treated as a meaningful signal; smaller gaps are considered mixed/neutral.</p>
-                </div>
-
-                <div class="guide-section">
-                    <h3>Earnings Proximity</h3>
-                    <p>If a company's next earnings report is within 3 days, the signal's confidence is reduced — earnings releases often cause sharp price gaps that can override technical signals.</p>
-                </div>
-
-                <div class="guide-section">
-                    <h3>How the Composite Signal Is Calculated</h3>
-                    <p>Each factor below contributes <strong>+1</strong> (bullish), <strong>−1</strong> (bearish), or <strong>0</strong> (neutral/unavailable) to a total score:</p>
+                    <h3>How the Signal Is Calculated</h3>
+                    <p>The BUY/SELL/HOLD badge on each card uses a simple RSI + trend rule:</p>
                     <ul>
-                        <li><strong>RSI:</strong> +1 if oversold (&lt;30), −1 if overbought (&gt;70), 0 otherwise</li>
-                        <li><strong>Price vs SMA(50):</strong> +1 if price is above, −1 if below</li>
-                        <li><strong>MACD vs Signal line:</strong> +1 if MACD is above its signal line, −1 if below</li>
-                        <li><strong>ADX + DI direction:</strong> if ADX &gt; 25 (strong trend), +1 if DI+ &gt; DI−, −1 if DI− &gt; DI+; if ADX ≤ 25, contributes 0 but flags the trend as weak</li>
-                        <li><strong>News sentiment</strong> (if available): +1 if bullish% exceeds bearish% by &gt;10 points, −1 if the reverse, 0 if mixed</li>
+                        <li><strong>BUY</strong> — RSI is oversold (&lt;30) <em>and</em> price is above SMA(50)</li>
+                        <li><strong>SELL</strong> — RSI is overbought (&gt;70) <em>and</em> price is below SMA(50)</li>
+                        <li><strong>HOLD</strong> — anything else, including mixed signals (e.g. oversold RSI but price still below SMA)</li>
                     </ul>
-                    <p><strong>Final signal:</strong></p>
-                    <ul>
-                        <li>Score ≥ <strong>+2</strong> → <strong>BUY</strong></li>
-                        <li>Score ≤ <strong>−2</strong> → <strong>SELL</strong></li>
-                        <li>Otherwise → <strong>HOLD</strong></li>
-                    </ul>
-                    <p><strong>Confidence</strong> = |score| ÷ max possible score, scaled to 0–100%. If ADX shows a weak/no trend, confidence is multiplied by 0.6. If earnings are within 3 days, confidence is further multiplied by 0.5.</p>
-                    <p><strong>Stop-loss / Target</strong> (only shown for BUY/SELL, not HOLD): set at 1.5× ATR and 3× ATR from the current price, in the direction of the trade.</p>
-                    <p style="margin-top:10px;"><em>This is decision support based on technical and sentiment data only — it is not financial advice, doesn't account for fundamentals, broader market conditions, or your personal risk tolerance, and can produce false signals especially in choppy/weak-trend markets.</em></p>
+                    <p style="margin-top:10px;"><em>This is decision support based on technical indicators only — it is not financial advice, doesn't account for fundamentals, news, or broader market conditions, and can produce false signals especially in choppy or ranging markets.</em></p>
                 </div>
             `;
         }
@@ -669,8 +606,6 @@ ADX = Wilder-smoothed average of DX</span>
             ui: { charts: {}, news: {}, alerts: {} },
             dataCache: {},
             newsCache: {},
-            sentimentCache: {},
-            earningsCache: {},
             errors: {},
             pin: localStorage.getItem('syncPin') || ''
         };
@@ -700,205 +635,34 @@ ADX = Wilder-smoothed average of DX</span>
         function getRSIArray(prices, period = CONFIG.RSI_PERIOD) { let rsi=[], gains=0, losses=0; for(let i=0; i<prices.length; i++) { if(i<period){rsi.push(null);continue;} if(i===period){for(let j=1;j<=period;j++){let d=prices[j]-prices[j-1]; if(d>0)gains+=d; else losses-=d;} }else{let d=prices[i]-prices[i-1]; gains=((gains*(period-1))+(d>0?d:0))/period; losses=((losses*(period-1))+(d<0?-d:0))/period; } let rs=losses===0?100:gains/losses; rsi.push(100-(100/(1+rs))); } return rsi; }
         function getMACDArray(prices, fast = CONFIG.MACD_FAST, slow = CONFIG.MACD_SLOW, signalPeriod = CONFIG.MACD_SIGNAL) { let emaFast=getEMAArray(prices, fast), emaSlow=getEMAArray(prices, slow), macd=prices.map((_,i)=>i>=slow-1 ? emaFast[i]-emaSlow[i] : null); let validMacd = macd.filter(x=>x!==null); let signalValid = getEMAArray(validMacd, signalPeriod); let signal = Array(macd.length - signalValid.length).fill(null).concat(signalValid); return {macd, signal}; }
 
-        // True Range / ATR — uses OHLC candles. Falls back gracefully if ohlc missing.
-        function getTRArray(ohlc) {
-            return ohlc.map((c, i) => {
-                if (i === 0 || c.h === null || c.l === null) return null;
-                const prevClose = ohlc[i-1].c;
-                return Math.max(c.h - c.l, Math.abs(c.h - prevClose), Math.abs(c.l - prevClose));
-            });
-        }
-        function getATRArray(ohlc, period = 14) {
-            const tr = getTRArray(ohlc);
-            const atr = [];
-            let prevAtr = null;
-            for (let i = 0; i < tr.length; i++) {
-                if (tr[i] === null) { atr.push(null); continue; }
-                if (prevAtr === null) {
-                    // seed with simple average of first `period` TRs
-                    const slice = tr.slice(Math.max(1, i - period + 1), i + 1).filter(x => x !== null);
-                    if (slice.length < period) { atr.push(null); continue; }
-                    prevAtr = slice.reduce((a,b)=>a+b, 0) / period;
-                    atr.push(prevAtr);
-                } else {
-                    prevAtr = (prevAtr * (period - 1) + tr[i]) / period;
-                    atr.push(prevAtr);
-                }
-            }
-            return atr;
-        }
-
-        // ADX (Average Directional Index) — Wilder's smoothing. Returns {adx, plusDI, minusDI}.
-        function getADXArray(ohlc, period = 14) {
-            const len = ohlc.length;
-            const plusDM = new Array(len).fill(null);
-            const minusDM = new Array(len).fill(null);
-            const tr = getTRArray(ohlc);
-
-            for (let i = 1; i < len; i++) {
-                if (ohlc[i].h === null || ohlc[i-1].h === null) continue;
-                const upMove = ohlc[i].h - ohlc[i-1].h;
-                const downMove = ohlc[i-1].l - ohlc[i].l;
-                plusDM[i] = (upMove > downMove && upMove > 0) ? upMove : 0;
-                minusDM[i] = (downMove > upMove && downMove > 0) ? downMove : 0;
-            }
-
-            const smooth = (arr) => {
-                const out = new Array(len).fill(null);
-                let prev = null;
-                for (let i = 0; i < len; i++) {
-                    if (arr[i] === null) continue;
-                    if (prev === null) {
-                        const slice = arr.slice(Math.max(0, i - period + 1), i + 1).filter(x => x !== null);
-                        if (slice.length < period) continue;
-                        prev = slice.reduce((a,b)=>a+b, 0);
-                        out[i] = prev;
-                    } else {
-                        prev = prev - (prev / period) + arr[i];
-                        out[i] = prev;
-                    }
-                }
-                return out;
-            };
-
-            const smoothedTR = smooth(tr);
-            const smoothedPlusDM = smooth(plusDM);
-            const smoothedMinusDM = smooth(minusDM);
-
-            const plusDI = new Array(len).fill(null);
-            const minusDI = new Array(len).fill(null);
-            const dx = new Array(len).fill(null);
-
-            for (let i = 0; i < len; i++) {
-                if (smoothedTR[i] === null || smoothedTR[i] === 0) continue;
-                plusDI[i] = 100 * smoothedPlusDM[i] / smoothedTR[i];
-                minusDI[i] = 100 * smoothedMinusDM[i] / smoothedTR[i];
-                const sum = plusDI[i] + minusDI[i];
-                dx[i] = sum === 0 ? 0 : 100 * Math.abs(plusDI[i] - minusDI[i]) / sum;
-            }
-
-            // ADX = Wilder smoothed average of DX
-            const adx = new Array(len).fill(null);
-            let prevAdx = null;
-            let dxStartIdx = dx.findIndex(x => x !== null);
-            for (let i = 0; i < len; i++) {
-                if (dx[i] === null) continue;
-                if (prevAdx === null) {
-                    const slice = dx.slice(dxStartIdx, dxStartIdx + period).filter(x => x !== null);
-                    if (i < dxStartIdx + period - 1) continue;
-                    prevAdx = slice.reduce((a,b)=>a+b, 0) / slice.length;
-                    adx[i] = prevAdx;
-                } else {
-                    prevAdx = (prevAdx * (period - 1) + dx[i]) / period;
-                    adx[i] = prevAdx;
-                }
-            }
-
-            return { adx, plusDI, minusDI };
-        }
-
-        // Recent swing high/low over a lookback window — simple support/resistance proxy
-        function getSwingLevels(ohlc, lookback = 20) {
-            const slice = ohlc.slice(-lookback).filter(c => c.h !== null && c.l !== null);
-            if (!slice.length) return { swingHigh: null, swingLow: null };
-            return {
-                swingHigh: Math.max(...slice.map(c => c.h)),
-                swingLow: Math.min(...slice.map(c => c.l)),
-            };
-        }
-
-        // Composite confluence score combining trend, momentum, volatility, and structure.
-        // Returns a signal object: { signal, score, confidence, reasons[], stopLoss, takeTarget }
-        function getCompositeSignal(prices, computed, ohlc, extras) {
-            extras = extras || {};
+        // Simple signal: RSI + price-vs-SMA50 crossover. No external data dependencies.
+        function getSimpleSignal(prices, computed) {
             const i = prices.length - 1;
             const currentPrice = prices[i];
-            const reasons = [];
-            let score = 0; // positive = bullish, negative = bearish
-            let maxScore = 4;
-
             const rsi = computed.rsi[i];
             const sma = computed.sma[i];
-            const macd = computed.macd.macd[i];
-            const macdSignal = computed.macd.signal[i];
-            const adx = computed.adx ? computed.adx.adx[i] : null;
-            const plusDI = computed.adx ? computed.adx.plusDI[i] : null;
-            const minusDI = computed.adx ? computed.adx.minusDI[i] : null;
-            const atr = computed.atr ? computed.atr[i] : null;
-
-            // Momentum: RSI
-            if (rsi !== null) {
-                if (rsi < 30) { score += 1; reasons.push(`RSI oversold (${rsi.toFixed(1)})`); }
-                else if (rsi > 70) { score -= 1; reasons.push(`RSI overbought (${rsi.toFixed(1)})`); }
-            }
-
-            // Trend direction: price vs SMA
-            if (sma !== null) {
-                if (currentPrice > sma) { score += 1; reasons.push(`Price above SMA${CONFIG.SMA_PERIOD}`); }
-                else { score -= 1; reasons.push(`Price below SMA${CONFIG.SMA_PERIOD}`); }
-            }
-
-            // Momentum: MACD vs signal line
-            if (macd !== null && macdSignal !== null) {
-                if (macd > macdSignal) { score += 1; reasons.push('MACD above signal line'); }
-                else { score -= 1; reasons.push('MACD below signal line'); }
-            }
-
-            // Trend strength: ADX + DI direction
-            let trendStrength = 'weak';
-            if (adx !== null) {
-                if (adx > 25) {
-                    trendStrength = 'strong';
-                    if (plusDI > minusDI) { score += 1; reasons.push(`Strong uptrend (ADX ${adx.toFixed(1)}, +DI>-DI)`); }
-                    else { score -= 1; reasons.push(`Strong downtrend (ADX ${adx.toFixed(1)}, -DI>+DI)`); }
-                } else {
-                    reasons.push(`Weak/no trend (ADX ${adx.toFixed(1)}) — signals less reliable`);
-                }
-            }
-
-            // News sentiment (Finnhub): bullishPercent vs bearishPercent
-            if (extras.sentiment && extras.sentiment.bullishPercent !== null && extras.sentiment.bearishPercent !== null) {
-                const { bullishPercent, bearishPercent } = extras.sentiment;
-                maxScore += 1;
-                const diff = bullishPercent - bearishPercent;
-                if (diff > 10) { score += 1; reasons.push(`News sentiment bullish (${bullishPercent}% vs ${bearishPercent}%)`); }
-                else if (diff < -10) { score -= 1; reasons.push(`News sentiment bearish (${bullishPercent}% vs ${bearishPercent}%)`); }
-                else { reasons.push(`News sentiment mixed (${bullishPercent}% vs ${bearishPercent}%)`); }
-            }
-
+            const reasons = [];
             let signal = 'HOLD';
-            if (score >= 2) signal = 'BUY';
-            else if (score <= -2) signal = 'SELL';
 
-            // Confidence scales with |score| and trend strength
-            let confidence = Math.min(100, Math.round((Math.abs(score) / maxScore) * 100));
-            if (trendStrength === 'weak') confidence = Math.round(confidence * 0.6);
-
-            // Earnings proximity warning — reduce confidence near earnings (volatility/gap risk)
-            if (extras.earnings && extras.earnings.daysUntil !== null && extras.earnings.daysUntil <= 3 && extras.earnings.daysUntil >= 0) {
-                const when = extras.earnings.daysUntil === 0 ? 'today' : `in ${extras.earnings.daysUntil}d`;
-                reasons.push(`⚠ Earnings ${when} — expect volatility, signal less reliable`);
-                confidence = Math.round(confidence * 0.5);
+            if (rsi !== null) {
+                if (rsi < 30) reasons.push(`RSI oversold (${rsi.toFixed(1)})`);
+                else if (rsi > 70) reasons.push(`RSI overbought (${rsi.toFixed(1)})`);
+            }
+            if (sma !== null) {
+                reasons.push(currentPrice > sma ? `Price above SMA${CONFIG.SMA_PERIOD}` : `Price below SMA${CONFIG.SMA_PERIOD}`);
             }
 
-            // Risk levels via ATR (if available), else swing levels
-            let stopLoss = null, takeTarget = null;
-            if (atr !== null) {
-                if (signal === 'BUY') {
-                    stopLoss = currentPrice - 1.5 * atr;
-                    takeTarget = currentPrice + 3 * atr;
-                } else if (signal === 'SELL') {
-                    stopLoss = currentPrice + 1.5 * atr;
-                    takeTarget = currentPrice - 3 * atr;
-                }
+            if (rsi !== null && sma !== null) {
+                if (rsi < 30 && currentPrice > sma) signal = 'BUY';
+                else if (rsi > 70 && currentPrice < sma) signal = 'SELL';
             }
 
-            return { signal, score, confidence, reasons, stopLoss, takeTarget, trendStrength, atr };
+            return { signal, reasons };
         }
 
         // Compute and cache all indicator arrays for a ticker's full price history.
         // Avoids recomputing on every render / chart redraw.
-        function computeIndicatorSet(prices, ohlc, extras) {
+        function computeIndicatorSet(prices, ohlc) {
             const set = {
                 sma: getSMAArray(prices),
                 sma20: getSMAArray(prices, 20),
@@ -907,48 +671,21 @@ ADX = Wilder-smoothed average of DX</span>
                 rsi: getRSIArray(prices),
                 macd: getMACDArray(prices),
             };
-            if (ohlc && ohlc.length === prices.length && ohlc.some(c => c.h !== null)) {
-                set.atr = getATRArray(ohlc);
-                set.adx = getADXArray(ohlc);
-                set.swing = getSwingLevels(ohlc);
-            }
-            set.composite = getCompositeSignal(prices, set, ohlc || [], extras);
+            set.composite = getSimpleSignal(prices, set);
             return set;
         }
 
         // --- API Data Fetching (via Cloudflare Worker proxy) ---
         async function fetchStockData(ticker) {
-            const cacheKey = `chart_${ticker}`;
-            const cached = sessionStorage.getItem(cacheKey);
-
-            // If we have a cached version, hydrate the state immediately for instant render,
-            // then fetch fresh data in the background and update if it differs.
-            let cachedData = null;
-            if (cached) {
-                try {
-                    cachedData = JSON.parse(cached);
-                    // Return cached data immediately — background refresh happens via the 60s interval
-                    if (appState.dataCache[ticker]) return cachedData; // already have live data this session
-                } catch(e) { sessionStorage.removeItem(cacheKey); }
-            }
-
             const res = await fetch(`${CONFIG.WORKER_BASE}/api/chart?ticker=${encodeURIComponent(ticker)}&range=1y&interval=1d`);
             if (!res.ok) {
                 let msg = `HTTP ${res.status}`;
                 try { const j = await res.json(); if(j.error) msg = j.error; } catch(e) {}
-                // Fall back to cached data if fetch fails
-                if (cachedData) return cachedData;
                 throw new Error(msg);
             }
             const data = await res.json();
-            if (!data.prices || !data.prices.length) {
-                if (cachedData) return cachedData;
-                throw new Error('No price data returned');
-            }
-            const result = { prices: data.prices, dates: data.dates, ohlc: data.ohlc || [] };
-            // Cache for this session — lightweight (just prices/dates/ohlc, not computed indicators)
-            try { sessionStorage.setItem(cacheKey, JSON.stringify(result)); } catch(e) {}
-            return result;
+            if (!data.prices || !data.prices.length) throw new Error('No price data returned');
+            return { prices: data.prices, dates: data.dates, ohlc: data.ohlc || [] };
         }
 
         async function fetchNews(ticker) {
@@ -958,33 +695,6 @@ ADX = Wilder-smoothed average of DX</span>
                 const data = await res.json();
                 return data.news || [];
             } catch(e) { return []; }
-        }
-
-        // Sentiment/earnings change slowly — fetch once per session per ticker, cached in appState
-        async function fetchSentiment(ticker) {
-            const cacheKey = `sentiment_${ticker}`;
-            const cached = sessionStorage.getItem(cacheKey);
-            if (cached) { try { return JSON.parse(cached); } catch(e) {} }
-            try {
-                const res = await fetch(`${CONFIG.WORKER_BASE}/api/sentiment?ticker=${encodeURIComponent(ticker)}`);
-                if (!res.ok) return null;
-                const data = await res.json();
-                try { sessionStorage.setItem(cacheKey, JSON.stringify(data)); } catch(e) {}
-                return data;
-            } catch(e) { return null; }
-        }
-
-        async function fetchEarnings(ticker) {
-            const cacheKey = `earnings_${ticker}`;
-            const cached = sessionStorage.getItem(cacheKey);
-            if (cached) { try { return JSON.parse(cached); } catch(e) {} }
-            try {
-                const res = await fetch(`${CONFIG.WORKER_BASE}/api/earnings?ticker=${encodeURIComponent(ticker)}`);
-                if (!res.ok) return null;
-                const data = await res.json();
-                try { sessionStorage.setItem(cacheKey, JSON.stringify(data)); } catch(e) {}
-                return data;
-            } catch(e) { return null; }
         }
 
         // --- Watchlist Sync (PIN-based, Cloudflare KV) ---
@@ -1070,12 +780,7 @@ ADX = Wilder-smoothed average of DX</span>
 
                 try {
                     const data = await fetchStockData(ticker);
-                    // Only use already-cached Finnhub extras — never fetch on load
-                    const extras = {
-                        sentiment: appState.sentimentCache[ticker] || null,
-                        earnings: appState.earningsCache[ticker] || null,
-                    };
-                    data.computed = computeIndicatorSet(data.prices, data.ohlc, extras);
+                    data.computed = computeIndicatorSet(data.prices, data.ohlc);
                     appState.dataCache[ticker] = data;
                     delete appState.errors[ticker];
                 } catch(e) {
@@ -1088,76 +793,15 @@ ADX = Wilder-smoothed average of DX</span>
             localStorage.setItem('indicators', JSON.stringify(appState.indicators));
         }
 
-        // On-demand Finnhub fetch — called by "Check Sentiment" button on each card
-        async function checkSentiment(ticker) {
-            const btn = document.getElementById(`sentiment-btn-${ticker}`);
-            const panel = document.getElementById(`sentiment-panel-${ticker}`);
-            if (btn) { btn.textContent = 'Loading...'; btn.disabled = true; }
-
-            const [sentiment, earnings] = await Promise.all([
-                fetchSentiment(ticker),
-                fetchEarnings(ticker)
-            ]);
-
-            appState.sentimentCache[ticker] = sentiment;
-            appState.earningsCache[ticker] = earnings;
-
-            const cached = appState.dataCache[ticker];
-            if (cached) {
-                cached.computed = computeIndicatorSet(cached.prices, cached.ohlc, { sentiment, earnings });
-            }
-
-            // Update sentiment panel inline without full re-render
-            if (panel) {
-                panel.innerHTML = buildSentimentHTML(ticker, sentiment, earnings);
-            }
-
-            // Recompute and update signal panel inline
-            const sigPanel = document.getElementById(`signal-panel-${ticker}`);
-            if (sigPanel && cached) {
-                sigPanel.innerHTML = buildSignalInnerHTML(cached.computed.composite);
-            }
-
-            if (btn) { btn.textContent = '↻ Refresh Sentiment'; btn.disabled = false; }
-        }
-
-        function buildSentimentHTML(ticker, sentiment, earnings) {
-            let html = '';
-            if (!sentiment && !earnings) {
-                return `<span style="color:var(--text-sub);font-size:0.8rem;">No Finnhub data available for ${ticker}</span>`;
-            }
-            if (sentiment && sentiment.bullishPercent !== null) {
-                const diff = sentiment.bullishPercent - sentiment.bearishPercent;
-                const color = diff > 10 ? 'var(--buy-color)' : diff < -10 ? 'var(--sell-color)' : 'var(--text-sub)';
-                html += `<span style="color:${color};font-size:0.82rem;">📰 News: ${sentiment.bullishPercent}% bullish / ${sentiment.bearishPercent}% bearish</span>`;
-                if (sentiment.buzzScore !== null) html += ` &nbsp;•&nbsp; <span style="font-size:0.82rem;color:var(--text-sub);">Buzz: ${sentiment.buzzScore}</span>`;
-            }
-            if (earnings && earnings.nextEarningsDate) {
-                const warn = earnings.daysUntil <= 3 ? '⚠ ' : '';
-                html += `<br><span style="font-size:0.82rem;color:var(--text-sub);">${warn}Earnings: ${earnings.nextEarningsDate} (${earnings.daysUntil}d away${earnings.hour ? ', ' + earnings.hour : ''})</span>`;
-            }
-            return html;
-        }
-
         function buildSignalInnerHTML(comp) {
             const sigClass = comp.signal === 'BUY' ? 'buy' : comp.signal === 'SELL' ? 'sell' : 'hold';
             return `
                 <div class="signal-header">
                     <span class="badge ${sigClass}">${comp.signal}</span>
-                    <span class="confidence-bar-wrap">
-                        <span class="confidence-bar" style="width:${comp.confidence}%; background:${sigClass==='buy'?'var(--buy-color)':sigClass==='sell'?'var(--sell-color)':'var(--hold-color)'}"></span>
-                    </span>
-                    <span class="confidence-label">${comp.confidence}% confidence</span>
                 </div>
                 <ul class="signal-reasons">
                     ${comp.reasons.map(r => `<li>${r}</li>`).join('')}
-                </ul>
-                ${comp.stopLoss !== null ? `
-                <div class="signal-levels">
-                    <span>Stop-loss: <strong>$${comp.stopLoss.toFixed(2)}</strong></span>
-                    <span>Target: <strong>$${comp.takeTarget.toFixed(2)}</strong></span>
-                    <span>ATR: ${comp.atr.toFixed(2)}</span>
-                </div>` : (comp.atr !== null ? `<div class="signal-levels"><span>ATR: ${comp.atr.toFixed(2)}</span></div>` : '')}`;
+                </ul>`;
         }
 
         // --- Alert System Logic ---
@@ -1263,7 +907,6 @@ ADX = Wilder-smoothed average of DX</span>
                         </div>`).join('');
                 }
 
-                const hasSentiment = !!appState.sentimentCache[ticker];
                 let signalHtml = `
                     <div class="signal-panel" id="signal-panel-${ticker}">
                         ${buildSignalInnerHTML(comp)}
@@ -1282,39 +925,10 @@ ADX = Wilder-smoothed average of DX</span>
                                     <span class="badge ${sigClass}">${comp.signal}</span>
                                 </div>
                             </div>
-
-                            <div class="stats-row">
-                                <div class="stat-item">
-                                    <span class="stat-label">ADX</span>
-                                    <span class="stat-value">${comp.atr !== null && data.computed.adx ? data.computed.adx.adx[data.computed.adx.adx.length-1].toFixed(1) : '—'}</span>
-                                </div>
-                                <div class="stat-item">
-                                    <span class="stat-label">ATR</span>
-                                    <span class="stat-value">${comp.atr !== null ? comp.atr.toFixed(2) : '—'}</span>
-                                </div>
-                                <div class="stat-item">
-                                    <span class="stat-label">Conf.</span>
-                                    <span class="stat-value">${comp.confidence}%</span>
-                                </div>
-                                <div class="stat-item">
-                                    <span class="stat-label">Trend</span>
-                                    <span class="stat-value" style="color:${comp.trendStrength === 'strong' ? 'var(--buy-color)' : 'var(--text-sub)'}">${comp.trendStrength === 'strong' ? 'Strong' : 'Weak'}</span>
-                                </div>
-                            </div>
                         </div>
 
                         <!-- Signal Detail -->
                         ${signalHtml}
-
-                        <!-- Sentiment -->
-                        <div class="sentiment-row">
-                            <div class="sentiment-panel" id="sentiment-panel-${ticker}">
-                                ${hasSentiment ? buildSentimentHTML(ticker, appState.sentimentCache[ticker], appState.earningsCache[ticker]) : ''}
-                            </div>
-                            <button class="sentiment-btn" id="sentiment-btn-${ticker}" onclick="checkSentiment('${ticker}')">
-                                ${hasSentiment ? '↻ Refresh' : '📰 Sentiment'}
-                            </button>
-                        </div>
 
                         <!-- Panel: CHART -->
                         <div class="panel chart-container ${ui.charts[ticker] ? 'active' : ''}">
@@ -1475,11 +1089,7 @@ ADX = Wilder-smoothed average of DX</span>
             (async () => {
                 try {
                     const data = await fetchStockData(ticker);
-                    const extras = {
-                        sentiment: appState.sentimentCache[ticker] || null,
-                        earnings: appState.earningsCache[ticker] || null,
-                    };
-                    data.computed = computeIndicatorSet(data.prices, data.ohlc, extras);
+                    data.computed = computeIndicatorSet(data.prices, data.ohlc);
                     appState.dataCache[ticker] = data;
                 } catch(e) {
                     appState.errors[ticker] = e.message || 'Failed to load';
@@ -1488,25 +1098,8 @@ ADX = Wilder-smoothed average of DX</span>
             })();
         }
 
-        // Initialize App — pre-hydrate from sessionStorage for instant first paint
+        // Initialize App
         document.getElementById('pinInput').value = appState.pin;
-        appState.watchlist.forEach(ticker => {
-            const raw = sessionStorage.getItem(`chart_${ticker}`);
-            if (raw) {
-                try {
-                    const data = JSON.parse(raw);
-                    const sentiment = JSON.parse(sessionStorage.getItem(`sentiment_${ticker}`) || 'null');
-                    const earnings = JSON.parse(sessionStorage.getItem(`earnings_${ticker}`) || 'null');
-                    if (sentiment) appState.sentimentCache[ticker] = sentiment;
-                    if (earnings) appState.earningsCache[ticker] = earnings;
-                    if(!appState.indicators[ticker]) appState.indicators[ticker] = {sma:false, sma20:false, ema20:false, bb:false, rsi:false, macd:false};
-                    data.computed = computeIndicatorSet(data.prices, data.ohlc, { sentiment, earnings });
-                    appState.dataCache[ticker] = data;
-                } catch(e) {}
-            }
-        });
-        // If we had cached data, render it immediately (before network)
-        if (Object.keys(appState.dataCache).length) renderUI();
 
         updateData();
         setInterval(updateData, CONFIG.REFRESH_MS);
