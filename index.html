@@ -881,8 +881,10 @@ Signal line = EMA(9) of MACD line</span>
                 const prices = data.prices;
                 const currentPrice = prices[prices.length-1];
                 const isBullish = currentPrice >= prices[prices.length-2];
-                const rsi = data.computed.rsi[data.computed.rsi.length-1].toFixed(1);
-                const sma = data.computed.sma[data.computed.sma.length-1].toFixed(2);
+                const rsiVal = data.computed.rsi[data.computed.rsi.length-1];
+                const smaVal = data.computed.sma[data.computed.sma.length-1];
+                const rsi = rsiVal !== null ? rsiVal.toFixed(1) : '—';
+                const sma = smaVal !== null ? smaVal.toFixed(2) : '—';
 
                 const comp = data.computed.composite;
                 const sigClass = comp.signal === 'BUY' ? 'buy' : comp.signal === 'SELL' ? 'sell' : 'hold';
