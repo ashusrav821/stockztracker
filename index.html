@@ -719,6 +719,10 @@ Signal line = EMA(9) of MACD line</span>
                 if (!res.ok) throw new Error(`HTTP ${res.status}`);
                 const data = await res.json();
                 if (!data.watchlist) { setSyncStatus('No saved watchlist found for this PIN', 'error'); return; }
+                if (!Array.isArray(data.watchlist) || !data.watchlist.every(t => typeof t === 'string')) {
+                    setSyncStatus('Cloud watchlist data is malformed', 'error');
+                    return;
+                }
 
                 appState.watchlist = data.watchlist;
                 appState.pin = pin;
@@ -775,19 +779,22 @@ Signal line = EMA(9) of MACD line</span>
         // --- Core Application Loop ---
         async function updateData() {
             await Promise.all(appState.watchlist.map(async ticker => {
-                if(!appState.indicators[ticker]) appState.indicators[ticker] = {sma:false, sma20:false, ema20:false, bb:false, rsi:false, macd:false};
-                if(!appState.alerts[ticker]) appState.alerts[ticker] = [];
+                ensureTickerState(ticker);
 
                 try {
                     const data = await fetchStockData(ticker);
+                    if (!Array.isArray(data.prices) || !data.prices.length) {
+                        throw new Error('No price data returned');
+                    }
                     data.computed = computeIndicatorSet(data.prices, data.ohlc);
                     appState.dataCache[ticker] = data;
                     delete appState.errors[ticker];
                 } catch(e) {
                     appState.errors[ticker] = e.message || 'Failed to load';
+                    delete appState.dataCache[ticker]; // Guardrail: don't render stale/partial data after a failed refresh
                 }
 
-                evaluateAlerts(ticker);
+                try { evaluateAlerts(ticker); } catch(e) { console.error(`evaluateAlerts failed for ${ticker}:`, e); }
                 renderUI(); // Render each card as soon as its data arrives
             }));
             localStorage.setItem('indicators', JSON.stringify(appState.indicators));
@@ -811,12 +818,15 @@ Signal line = EMA(9) of MACD line</span>
 
         function evaluateAlerts(ticker) {
             const data = appState.dataCache[ticker];
-            if(!data || !appState.alerts[ticker].length) return;
+            if(!data || !appState.alerts[ticker] || !appState.alerts[ticker].length) return;
+            if (!Array.isArray(data.prices) || !data.prices.length || !data.computed) return;
 
             const prices = data.prices;
             const currentPrice = prices[prices.length-1];
-            const rsi = data.computed.rsi[data.computed.rsi.length-1];
-            const sma = data.computed.sma[data.computed.sma.length-1];
+            const rsiArr = data.computed.rsi || [];
+            const smaArr = data.computed.sma || [];
+            const rsi = rsiArr.length ? rsiArr[rsiArr.length-1] : null;
+            const sma = smaArr.length ? smaArr[smaArr.length-1] : null;
 
             let stateChanged = false;
 
@@ -859,137 +869,185 @@ Signal line = EMA(9) of MACD line</span>
         // --- UI Rendering ---
         function renderUI() {
             const container = document.getElementById('watchlist');
+            if (!container) return;
             if(appState.watchlist.length === 0) { container.innerHTML = '<div class="info-card">No stocks tracked. Add one above.</div>'; return; }
             
             let html = '';
             for (let ticker of appState.watchlist) {
-                const data = appState.dataCache[ticker];
-
-                if(!data) {
-                    if(appState.errors[ticker]) {
-                        html += `
-                            <div class="info-card error-card">
-                                <div><strong>${ticker}</strong>: ${appState.errors[ticker]}</div>
-                                <button class="retry-btn" onclick="retryStock('${ticker}')">Retry</button>
-                            </div>`;
-                    } else {
-                        html += `<div class="info-card">${ticker}: Loading...</div>`;
-                    }
-                    continue;
+                try {
+                    html += renderStockCard(ticker);
+                } catch (e) {
+                    // Guardrail: one ticker's bad data must never break the whole list.
+                    console.error(`renderUI failed for ${ticker}:`, e);
+                    html += `
+                        <div class="info-card error-card">
+                            <div><strong>${ticker}</strong>: Display error (${e.message || 'unknown'})</div>
+                            <button class="retry-btn" onclick="retryStock('${ticker}')">Retry</button>
+                        </div>`;
                 }
-
-                const prices = data.prices;
-                const currentPrice = prices[prices.length-1];
-                const isBullish = currentPrice >= prices[prices.length-2];
-                const rsiVal = data.computed.rsi[data.computed.rsi.length-1];
-                const smaVal = data.computed.sma[data.computed.sma.length-1];
-                const rsi = rsiVal !== null ? rsiVal.toFixed(1) : '—';
-                const sma = smaVal !== null ? smaVal.toFixed(2) : '—';
-
-                const comp = data.computed.composite;
-                const sigClass = comp.signal === 'BUY' ? 'buy' : comp.signal === 'SELL' ? 'sell' : 'hold';
-
-                const ui = appState.ui;
-                const inds = appState.indicators[ticker];
-
-                let alertsHtml = appState.alerts[ticker].map(a => `
-                    <div class="active-alert">
-                        <span>${a.triggered ? '⚠️' : '🔔'} ${a.ind} ${a.cond} ${a.val}</span>
-                        <button class="del-alert" onclick="deleteAlert('${ticker}', ${a.id})">✕</button>
-                    </div>
-                `).join('');
-
-                let newsHtml = '<div style="text-align:center;color:var(--text-sub);font-size:0.85rem;">Loading news...</div>';
-                if (appState.newsCache[ticker]) {
-                    newsHtml = appState.newsCache[ticker].length === 0 ? '<div style="color:var(--text-sub);font-size:0.8rem;">No recent news found.</div>' :
-                        appState.newsCache[ticker].map(n => `
-                        <div class="news-item">
-                            <a href="${n.link}" target="_blank">${n.title}</a>
-                            <div class="news-date">${n.publisher} • ${new Date(n.providerPublishTime*1000).toLocaleDateString()}</div>
-                        </div>`).join('');
-                }
-
-                let signalHtml = `
-                    <div class="signal-panel" id="signal-panel-${ticker}">
-                        ${buildSignalInnerHTML(comp)}
-                    </div>`;
-
-                html += `
-                    <div class="stock-card sig-${sigClass}">
-                        <div class="card-inner">
-                            <div class="card-top">
-                                <div class="card-left">
-                                    <h2 class="ticker">${ticker}</h2>
-                                    <span class="company-meta">RSI ${rsi} &nbsp;·&nbsp; SMA $${sma}</span>
-                                </div>
-                                <div class="card-right">
-                                    <h2 class="price" style="color:${isBullish ? 'var(--buy-color)' : 'var(--sell-color)'}">$${currentPrice.toFixed(2)}</h2>
-                                    <span class="badge ${sigClass}">${comp.signal}</span>
-                                </div>
-                            </div>
-                        </div>
-
-                        <!-- Signal Detail -->
-                        ${signalHtml}
-
-                        <!-- Panel: CHART -->
-                        <div class="panel chart-container ${ui.charts[ticker] ? 'active' : ''}">
-                            <div class="indicator-toggles">
-                                <button class="ind-btn ${inds.sma?'active':''}" onclick="toggleUI('${ticker}', 'ind', 'sma')">SMA 50</button>
-                                <button class="ind-btn ${inds.sma20?'active':''}" onclick="toggleUI('${ticker}', 'ind', 'sma20')">SMA 20</button>
-                                <button class="ind-btn ${inds.ema20?'active':''}" onclick="toggleUI('${ticker}', 'ind', 'ema20')">EMA 20</button>
-                                <button class="ind-btn ${inds.bb?'active':''}" onclick="toggleUI('${ticker}', 'ind', 'bb')">BB</button>
-                                <button class="ind-btn ${inds.rsi?'active':''}" onclick="toggleUI('${ticker}', 'ind', 'rsi')">RSI</button>
-                                <button class="ind-btn ${inds.macd?'active':''}" onclick="toggleUI('${ticker}', 'ind', 'macd')">MACD</button>
-                            </div>
-                            <div class="canvas-wrapper"><canvas id="canvas-${ticker}"></canvas></div>
-                        </div>
-
-                        <!-- Panel: NEWS -->
-                        <div class="panel ${ui.news[ticker] ? 'active' : ''}">${newsHtml}</div>
-
-                        <!-- Panel: ALERTS -->
-                        <div class="panel ${ui.alerts[ticker] ? 'active' : ''}">
-                            <div style="margin-bottom:10px;">${alertsHtml}</div>
-                            <div style="font-size:0.78rem; color:var(--text-sub); margin-bottom:6px; font-weight:600; text-transform:uppercase; letter-spacing:0.4px;">New Alert</div>
-                            <div class="alert-form">
-                                <select id="alt-ind-${ticker}"><option value="Price">Price</option><option value="RSI">RSI</option><option value="SMA">SMA 50</option></select>
-                                <select id="alt-cond-${ticker}"><option value=">">Above</option><option value="<">Below</option></select>
-                                <input type="number" id="alt-val-${ticker}" placeholder="Value">
-                                <button onclick="addCustomAlert('${ticker}')">Set</button>
-                            </div>
-                        </div>
-
-                        <div class="actions">
-                            <button class="icon-btn ${ui.charts[ticker]?'active':''}" onclick="toggleUI('${ticker}', 'panel', 'charts')">
-                                <span class="icon-glyph">📈</span><span>Chart</span>
-                            </button>
-                            <button class="icon-btn ${ui.news[ticker]?'active':''}" onclick="toggleUI('${ticker}', 'panel', 'news')">
-                                <span class="icon-glyph">📰</span><span>News</span>
-                            </button>
-                            <button class="icon-btn ${ui.alerts[ticker]?'active':''}" onclick="toggleUI('${ticker}', 'panel', 'alerts')">
-                                <span class="icon-glyph">🔔</span><span>Alerts</span>
-                            </button>
-                            <button class="icon-btn" onclick="deleteStock('${ticker}')">
-                                <span class="icon-glyph">✕</span><span>Remove</span>
-                            </button>
-                        </div>
-                    </div>
-                `;
             }
 
             container.innerHTML = html;
-            appState.watchlist.forEach(ticker => { if(appState.ui.charts[ticker] && appState.dataCache[ticker]) drawChart(ticker); });
+            appState.watchlist.forEach(ticker => {
+                if (appState.ui.charts[ticker] && appState.dataCache[ticker]) {
+                    try { drawChart(ticker); } catch (e) { console.error(`drawChart failed for ${ticker}:`, e); }
+                }
+            });
+        }
+
+        // Ensures per-ticker state objects exist, regardless of how the ticker entered the watchlist
+        // (typed in, loaded from PIN sync, etc.) — guards against undefined access anywhere downstream.
+        function ensureTickerState(ticker) {
+            if (!appState.indicators[ticker]) appState.indicators[ticker] = {sma:false, sma20:false, ema20:false, bb:false, rsi:false, macd:false};
+            if (!appState.alerts[ticker]) appState.alerts[ticker] = [];
+        }
+
+        function renderStockCard(ticker) {
+            ensureTickerState(ticker);
+            const data = appState.dataCache[ticker];
+
+            if(!data) {
+                if(appState.errors[ticker]) {
+                    return `
+                        <div class="info-card error-card">
+                            <div><strong>${ticker}</strong>: ${appState.errors[ticker]}</div>
+                            <button class="retry-btn" onclick="retryStock('${ticker}')">Retry</button>
+                        </div>`;
+                }
+                return `<div class="info-card">${ticker}: Loading...</div>`;
+            }
+
+            // Guardrail: malformed/empty data shouldn't crash — show an error card instead.
+            if (!Array.isArray(data.prices) || data.prices.length === 0 || !data.computed) {
+                return `
+                    <div class="info-card error-card">
+                        <div><strong>${ticker}</strong>: No usable price data</div>
+                        <button class="retry-btn" onclick="retryStock('${ticker}')">Retry</button>
+                    </div>`;
+            }
+
+            const prices = data.prices;
+            const currentPrice = prices[prices.length-1];
+            const prevPrice = prices.length > 1 ? prices[prices.length-2] : currentPrice;
+            const isBullish = currentPrice >= prevPrice;
+
+            const computed = data.computed;
+            const rsiArr = computed.rsi || [];
+            const smaArr = computed.sma || [];
+            const rsiVal = rsiArr.length ? rsiArr[rsiArr.length-1] : null;
+            const smaVal = smaArr.length ? smaArr[smaArr.length-1] : null;
+            const rsi = (rsiVal !== null && rsiVal !== undefined) ? rsiVal.toFixed(1) : '—';
+            const sma = (smaVal !== null && smaVal !== undefined) ? smaVal.toFixed(2) : '—';
+
+            const comp = computed.composite || { signal: 'HOLD', reasons: [] };
+            const sigClass = comp.signal === 'BUY' ? 'buy' : comp.signal === 'SELL' ? 'sell' : 'hold';
+
+            const ui = appState.ui;
+            const inds = appState.indicators[ticker];
+
+            let alertsHtml = (appState.alerts[ticker] || []).map(a => `
+                <div class="active-alert">
+                    <span>${a.triggered ? '⚠️' : '🔔'} ${a.ind} ${a.cond} ${a.val}</span>
+                    <button class="del-alert" onclick="deleteAlert('${ticker}', ${a.id})">✕</button>
+                </div>
+            `).join('');
+
+            let newsHtml = '<div style="text-align:center;color:var(--text-sub);font-size:0.85rem;">Loading news...</div>';
+            if (appState.newsCache[ticker]) {
+                const newsItems = appState.newsCache[ticker] || [];
+                newsHtml = newsItems.length === 0 ? '<div style="color:var(--text-sub);font-size:0.8rem;">No recent news found.</div>' :
+                    newsItems.map(n => `
+                    <div class="news-item">
+                        <a href="${n.link || '#'}" target="_blank">${n.title || 'Untitled'}</a>
+                        <div class="news-date">${n.publisher || ''} • ${n.providerPublishTime ? new Date(n.providerPublishTime*1000).toLocaleDateString() : ''}</div>
+                    </div>`).join('');
+            }
+
+            let signalHtml = `
+                <div class="signal-panel" id="signal-panel-${ticker}">
+                    ${buildSignalInnerHTML(comp)}
+                </div>`;
+
+            return `
+                <div class="stock-card sig-${sigClass}">
+                    <div class="card-inner">
+                        <div class="card-top">
+                            <div class="card-left">
+                                <h2 class="ticker">${ticker}</h2>
+                                <span class="company-meta">RSI ${rsi} &nbsp;·&nbsp; SMA $${sma}</span>
+                            </div>
+                            <div class="card-right">
+                                <h2 class="price" style="color:${isBullish ? 'var(--buy-color)' : 'var(--sell-color)'}">$${currentPrice.toFixed(2)}</h2>
+                                <span class="badge ${sigClass}">${comp.signal}</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Signal Detail -->
+                    ${signalHtml}
+
+                    <!-- Panel: CHART -->
+                    <div class="panel chart-container ${ui.charts[ticker] ? 'active' : ''}">
+                        <div class="indicator-toggles">
+                            <button class="ind-btn ${inds.sma?'active':''}" onclick="toggleUI('${ticker}', 'ind', 'sma')">SMA 50</button>
+                            <button class="ind-btn ${inds.sma20?'active':''}" onclick="toggleUI('${ticker}', 'ind', 'sma20')">SMA 20</button>
+                            <button class="ind-btn ${inds.ema20?'active':''}" onclick="toggleUI('${ticker}', 'ind', 'ema20')">EMA 20</button>
+                            <button class="ind-btn ${inds.bb?'active':''}" onclick="toggleUI('${ticker}', 'ind', 'bb')">BB</button>
+                            <button class="ind-btn ${inds.rsi?'active':''}" onclick="toggleUI('${ticker}', 'ind', 'rsi')">RSI</button>
+                            <button class="ind-btn ${inds.macd?'active':''}" onclick="toggleUI('${ticker}', 'ind', 'macd')">MACD</button>
+                        </div>
+                        <div class="canvas-wrapper"><canvas id="canvas-${ticker}"></canvas></div>
+                    </div>
+
+                    <!-- Panel: NEWS -->
+                    <div class="panel ${ui.news[ticker] ? 'active' : ''}">${newsHtml}</div>
+
+                    <!-- Panel: ALERTS -->
+                    <div class="panel ${ui.alerts[ticker] ? 'active' : ''}">
+                        <div style="margin-bottom:10px;">${alertsHtml}</div>
+                        <div style="font-size:0.78rem; color:var(--text-sub); margin-bottom:6px; font-weight:600; text-transform:uppercase; letter-spacing:0.4px;">New Alert</div>
+                        <div class="alert-form">
+                            <select id="alt-ind-${ticker}"><option value="Price">Price</option><option value="RSI">RSI</option><option value="SMA">SMA 50</option></select>
+                            <select id="alt-cond-${ticker}"><option value=">">Above</option><option value="<">Below</option></select>
+                            <input type="number" id="alt-val-${ticker}" placeholder="Value">
+                            <button onclick="addCustomAlert('${ticker}')">Set</button>
+                        </div>
+                    </div>
+
+                    <div class="actions">
+                        <button class="icon-btn ${ui.charts[ticker]?'active':''}" onclick="toggleUI('${ticker}', 'panel', 'charts')">
+                            <span class="icon-glyph">📈</span><span>Chart</span>
+                        </button>
+                        <button class="icon-btn ${ui.news[ticker]?'active':''}" onclick="toggleUI('${ticker}', 'panel', 'news')">
+                            <span class="icon-glyph">📰</span><span>News</span>
+                        </button>
+                        <button class="icon-btn ${ui.alerts[ticker]?'active':''}" onclick="toggleUI('${ticker}', 'panel', 'alerts')">
+                            <span class="icon-glyph">🔔</span><span>Alerts</span>
+                        </button>
+                        <button class="icon-btn" onclick="deleteStock('${ticker}')">
+                            <span class="icon-glyph">✕</span><span>Remove</span>
+                        </button>
+                    </div>
+                </div>
+            `;
         }
 
         // --- Chart Drawing Logic ---
         function drawChart(ticker) {
             const data = appState.dataCache[ticker];
+            if (!data || !Array.isArray(data.prices) || !data.prices.length || !data.computed) return;
+
+            const canvas = document.getElementById(`canvas-${ticker}`);
+            if (!canvas) return; // Guardrail: panel may have closed/re-rendered before this ran
+            const ctx = canvas.getContext('2d');
+
+            ensureTickerState(ticker);
             const inds = appState.indicators[ticker];
-            const ctx = document.getElementById(`canvas-${ticker}`).getContext('2d');
+            const computed = data.computed;
             
             const sl = Math.min(CONFIG.CHART_WINDOW_DAYS, data.prices.length); 
-            const prices = data.prices.slice(-sl), dates = data.dates.slice(-sl);
+            const prices = data.prices.slice(-sl), dates = (data.dates || []).slice(-sl);
+            if (!prices.length) return;
             
             // EXPLICIT COLORS: Fixes the "black lines in dark mode" bug in Chart.js
             const isLight = document.body.classList.contains('light-mode');
@@ -1015,14 +1073,14 @@ Signal line = EMA(9) of MACD line</span>
                 borderWidth: 2, pointRadius: 0, fill: false, tension: 0.1, yAxisID: 'y'
             }];
 
-            if(inds.sma) datasets.push({ label: 'SMA (50)', data: data.computed.sma.slice(-sl), borderColor: cSma, borderWidth: 1.5, borderDash: [5, 5], pointRadius: 0, yAxisID: 'y' });
-            if(inds.sma20) datasets.push({ label: 'SMA (20)', data: data.computed.sma20.slice(-sl), borderColor: cSma20, borderWidth: 1.5, borderDash: [5, 5], pointRadius: 0, yAxisID: 'y' });
-            if(inds.ema20) datasets.push({ label: 'EMA (20)', data: data.computed.ema20.slice(-sl), borderColor: cEma20, borderWidth: 1.5, pointRadius: 0, yAxisID: 'y' });
-            if(inds.bb) { let bb = data.computed.bb; datasets.push({ label: 'BB Upper', data: bb.upper.slice(-sl), borderColor: cBb, borderWidth: 1, pointRadius: 0, yAxisID: 'y' }, { label: 'BB Lower', data: bb.lower.slice(-sl), borderColor: cBb, borderWidth: 1, pointRadius: 0, yAxisID: 'y' }); }
+            if(inds.sma && computed.sma) datasets.push({ label: 'SMA (50)', data: computed.sma.slice(-sl), borderColor: cSma, borderWidth: 1.5, borderDash: [5, 5], pointRadius: 0, yAxisID: 'y' });
+            if(inds.sma20 && computed.sma20) datasets.push({ label: 'SMA (20)', data: computed.sma20.slice(-sl), borderColor: cSma20, borderWidth: 1.5, borderDash: [5, 5], pointRadius: 0, yAxisID: 'y' });
+            if(inds.ema20 && computed.ema20) datasets.push({ label: 'EMA (20)', data: computed.ema20.slice(-sl), borderColor: cEma20, borderWidth: 1.5, pointRadius: 0, yAxisID: 'y' });
+            if(inds.bb && computed.bb) { let bb = computed.bb; datasets.push({ label: 'BB Upper', data: bb.upper.slice(-sl), borderColor: cBb, borderWidth: 1, pointRadius: 0, yAxisID: 'y' }, { label: 'BB Lower', data: bb.lower.slice(-sl), borderColor: cBb, borderWidth: 1, pointRadius: 0, yAxisID: 'y' }); }
             
             let hasOscillator = inds.rsi || inds.macd;
-            if(inds.rsi) datasets.push({ label: 'RSI', data: data.computed.rsi.slice(-sl), borderColor: cRsi, borderWidth: 1.5, pointRadius: 0, yAxisID: 'y2', spanGaps: true });
-            if(inds.macd) { let m = data.computed.macd; datasets.push({ label: 'MACD', data: m.macd.slice(-sl), borderColor: cMacd, borderWidth: 1.5, pointRadius: 0, yAxisID: 'y2', spanGaps: true }, { label: 'Signal', data: m.signal.slice(-sl), borderColor: '#859900', borderWidth: 1, pointRadius: 0, yAxisID: 'y2', spanGaps: true }); }
+            if(inds.rsi && computed.rsi) datasets.push({ label: 'RSI', data: computed.rsi.slice(-sl), borderColor: cRsi, borderWidth: 1.5, pointRadius: 0, yAxisID: 'y2', spanGaps: true });
+            if(inds.macd && computed.macd) { let m = computed.macd; datasets.push({ label: 'MACD', data: m.macd.slice(-sl), borderColor: cMacd, borderWidth: 1.5, pointRadius: 0, yAxisID: 'y2', spanGaps: true }, { label: 'Signal', data: m.signal.slice(-sl), borderColor: '#859900', borderWidth: 1, pointRadius: 0, yAxisID: 'y2', spanGaps: true }); }
 
             let scales = {
                 x: {
@@ -1086,19 +1144,41 @@ Signal line = EMA(9) of MACD line</span>
         }
 
         function retryStock(ticker) {
+            ensureTickerState(ticker);
             delete appState.errors[ticker];
             renderUI();
             (async () => {
                 try {
                     const data = await fetchStockData(ticker);
+                    if (!Array.isArray(data.prices) || !data.prices.length) {
+                        throw new Error('No price data returned');
+                    }
                     data.computed = computeIndicatorSet(data.prices, data.ohlc);
                     appState.dataCache[ticker] = data;
+                    delete appState.errors[ticker];
                 } catch(e) {
                     appState.errors[ticker] = e.message || 'Failed to load';
+                    delete appState.dataCache[ticker];
                 }
                 renderUI();
             })();
         }
+
+        // Guardrail: if anything unforeseen crashes outside our try/catch blocks,
+        // show it instead of leaving a silent "Initializing Data..." or blank page.
+        window.addEventListener('error', (event) => {
+            console.error('Unhandled error:', event.error);
+            const container = document.getElementById('watchlist');
+            if (container && container.innerHTML.includes('Initializing Data')) {
+                container.innerHTML = `<div class="info-card error-card">
+                    <div>Something went wrong loading the app: ${event.message || 'unknown error'}</div>
+                    <button class="retry-btn" onclick="location.reload()">Reload</button>
+                </div>`;
+            }
+        });
+        window.addEventListener('unhandledrejection', (event) => {
+            console.error('Unhandled promise rejection:', event.reason);
+        });
 
         // Initialize App
         document.getElementById('pinInput').value = appState.pin;
