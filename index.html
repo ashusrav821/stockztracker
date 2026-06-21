@@ -326,6 +326,20 @@
             background: var(--accent-dim);
         }
 
+        /* Chart legend with live values */
+        .chart-legend-values {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px 14px;
+            margin-bottom: 10px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid var(--divider);
+        }
+        .legend-item { display: flex; align-items: center; gap: 5px; font-size: 0.74rem; }
+        .legend-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+        .legend-name { color: var(--text-sub); font-weight: 600; }
+        .legend-value { color: var(--text-main); font-weight: 700; }
+
         /* News */
         .news-item { padding: 10px 0; border-bottom: 1px solid var(--divider); }
         .news-item:last-child { border-bottom: none; }
@@ -996,6 +1010,7 @@ Signal line = EMA(9) of MACD line</span>
                             <button class="ind-btn ${inds.rsi?'active':''}" onclick="toggleUI('${ticker}', 'ind', 'rsi')">RSI</button>
                             <button class="ind-btn ${inds.macd?'active':''}" onclick="toggleUI('${ticker}', 'ind', 'macd')">MACD</button>
                         </div>
+                        <div class="chart-legend-values" id="legend-${ticker}"></div>
                         <div class="canvas-wrapper"><canvas id="canvas-${ticker}"></canvas></div>
                     </div>
 
@@ -1081,6 +1096,43 @@ Signal line = EMA(9) of MACD line</span>
             let hasOscillator = inds.rsi || inds.macd;
             if(inds.rsi && computed.rsi) datasets.push({ label: 'RSI', data: computed.rsi.slice(-sl), borderColor: cRsi, borderWidth: 1.5, pointRadius: 0, yAxisID: 'y2', spanGaps: true });
             if(inds.macd && computed.macd) { let m = computed.macd; datasets.push({ label: 'MACD', data: m.macd.slice(-sl), borderColor: cMacd, borderWidth: 1.5, pointRadius: 0, yAxisID: 'y2', spanGaps: true }, { label: 'Signal', data: m.signal.slice(-sl), borderColor: '#859900', borderWidth: 1, pointRadius: 0, yAxisID: 'y2', spanGaps: true }); }
+
+            // --- Live value legend: shows the current (last) value for each active indicator ---
+            // so the user doesn't have to hover/guess based on line position.
+            const lastValid = (arr) => {
+                if (!arr || !arr.length) return null;
+                for (let i = arr.length - 1; i >= 0; i--) {
+                    if (arr[i] !== null && arr[i] !== undefined && !Number.isNaN(arr[i])) return arr[i];
+                }
+                return null;
+            };
+            const fmt = (v, decimals) => v === null ? '—' : v.toFixed(decimals);
+
+            let legendItems = [];
+            legendItems.push({ name: 'Price', color: (prices[prices.length-1] >= prices[prices.length-2]) ? cBuy : cSell, value: fmt(prices[prices.length-1], 2) });
+            if (inds.sma && computed.sma) legendItems.push({ name: 'SMA 50', color: cSma, value: fmt(lastValid(computed.sma), 2) });
+            if (inds.sma20 && computed.sma20) legendItems.push({ name: 'SMA 20', color: cSma20, value: fmt(lastValid(computed.sma20), 2) });
+            if (inds.ema20 && computed.ema20) legendItems.push({ name: 'EMA 20', color: cEma20, value: fmt(lastValid(computed.ema20), 2) });
+            if (inds.bb && computed.bb) {
+                legendItems.push({ name: 'BB Upper', color: cBb, value: fmt(lastValid(computed.bb.upper), 2) });
+                legendItems.push({ name: 'BB Lower', color: cBb, value: fmt(lastValid(computed.bb.lower), 2) });
+            }
+            if (inds.rsi && computed.rsi) legendItems.push({ name: 'RSI', color: cRsi, value: fmt(lastValid(computed.rsi), 1) });
+            if (inds.macd && computed.macd) {
+                legendItems.push({ name: 'MACD', color: cMacd, value: fmt(lastValid(computed.macd.macd), 2) });
+                legendItems.push({ name: 'Signal', color: '#859900', value: fmt(lastValid(computed.macd.signal), 2) });
+            }
+
+            const legendEl = document.getElementById(`legend-${ticker}`);
+            if (legendEl) {
+                legendEl.innerHTML = legendItems.map(item => `
+                    <span class="legend-item">
+                        <span class="legend-dot" style="background:${item.color}"></span>
+                        <span class="legend-name">${item.name}</span>
+                        <span class="legend-value">${item.value}</span>
+                    </span>
+                `).join('');
+            }
 
             let scales = {
                 x: {
