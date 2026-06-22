@@ -583,14 +583,31 @@ Signal line = EMA(9) of MACD line</span>
                 </div>
 
                 <div class="guide-section">
-                    <h3>How the Signal Is Calculated</h3>
-                    <p>The BUY/SELL/HOLD badge on each card uses a simple RSI + trend rule:</p>
+                    <h3>SMA 200 — Long-term Trend Filter</h3>
+                    <p>The 200-day simple moving average is the most widely used long-term trend indicator. Price above SMA200 = long-term uptrend; price below = long-term downtrend. The <strong>Golden Cross</strong> (SMA50 crossing above SMA200) and <strong>Death Cross</strong> (SMA50 crossing below SMA200) are the most cited trend-change signals in all of technical analysis.</p>
+                    <p>SMA200 appears as a warning in the signal reasons if your BUY/SELL signal is going against the long-term trend — it won't block the signal, but flags the higher risk.</p>
+                </div>
+
+                <div class="guide-section">
+                    <h3>ADX — Average Directional Index (Trend Strength)</h3>
+                    <p>ADX measures <em>how strong</em> a trend is on a 0–100 scale — it does not indicate direction (that comes from SMA/price). Displayed in green when strong, red when weak.</p>
                     <ul>
-                        <li><strong>BUY</strong> — RSI is oversold (&lt;30) <em>and</em> price is above SMA(50)</li>
-                        <li><strong>SELL</strong> — RSI is overbought (&gt;70) <em>and</em> price is below SMA(50)</li>
-                        <li><strong>HOLD</strong> — anything else, including mixed signals (e.g. oversold RSI but price still below SMA)</li>
+                        <li><strong>ADX &gt; 25</strong> — real trend confirmed, signals are more reliable</li>
+                        <li><strong>ADX &lt; 20</strong> — choppy/ranging market, breakout/crossover signals are frequently false</li>
                     </ul>
-                    <p style="margin-top:10px;"><em>This is decision support based on technical indicators only — it is not financial advice, doesn't account for fundamentals, news, or broader market conditions, and can produce false signals especially in choppy or ranging markets.</em></p>
+                    <p>ADX is always shown in the chart legend regardless of which indicators are toggled — it's context for trusting everything else.</p>
+                </div>
+
+                <div class="guide-section">
+                    <h3>How the Signal Is Calculated</h3>
+                    <p>The BUY/SELL/HOLD badge uses a two-factor rule based on RSI and SMA(50):</p>
+                    <ul>
+                        <li><strong>BUY</strong> — RSI oversold (&lt;30) <em>and</em> price above SMA(50)</li>
+                        <li><strong>SELL</strong> — RSI overbought (&gt;70) <em>and</em> price below SMA(50)</li>
+                        <li><strong>HOLD</strong> — anything else (mixed signals)</li>
+                    </ul>
+                    <p>The <strong>reasons list</strong> below the badge shows additional context — SMA200 long-term trend alignment, and ADX trend strength — which do not change the signal but tell you how much to trust it. An ⚠ caution appears when the signal conflicts with the SMA200 direction.</p>
+                    <p style="margin-top:10px;"><em>This is decision support based on technical indicators only — not financial advice. Past patterns don't guarantee future price action, and signals are less reliable in low-ADX choppy markets.</em></p>
                 </div>
             `;
         }
@@ -649,12 +666,82 @@ Signal line = EMA(9) of MACD line</span>
         function getRSIArray(prices, period = CONFIG.RSI_PERIOD) { let rsi=[], gains=0, losses=0; for(let i=0; i<prices.length; i++) { if(i<period){rsi.push(null);continue;} if(i===period){for(let j=1;j<=period;j++){let d=prices[j]-prices[j-1]; if(d>0)gains+=d; else losses-=d;} }else{let d=prices[i]-prices[i-1]; gains=((gains*(period-1))+(d>0?d:0))/period; losses=((losses*(period-1))+(d<0?-d:0))/period; } let rs=losses===0?100:gains/losses; rsi.push(100-(100/(1+rs))); } return rsi; }
         function getMACDArray(prices, fast = CONFIG.MACD_FAST, slow = CONFIG.MACD_SLOW, signalPeriod = CONFIG.MACD_SIGNAL) { let emaFast=getEMAArray(prices, fast), emaSlow=getEMAArray(prices, slow), macd=prices.map((_,i)=>i>=slow-1 ? emaFast[i]-emaSlow[i] : null); let validMacd = macd.filter(x=>x!==null); let signalValid = getEMAArray(validMacd, signalPeriod); let signal = Array(macd.length - signalValid.length).fill(null).concat(signalValid); return {macd, signal}; }
 
-        // Simple signal: RSI + price-vs-SMA50 crossover. No external data dependencies.
+        // ADX (Average Directional Index) — Wilder's smoothing. Measures trend STRENGTH (0-100),
+        // not direction. >25 = real trend worth trusting, <20 = choppy/range-bound, signals less reliable.
+        // Requires OHLC (high/low); returns all-null array if unavailable so callers can degrade gracefully.
+        function getADXArray(ohlc, period = 14) {
+            const len = ohlc.length;
+            const nullArr = () => new Array(len).fill(null);
+            if (!ohlc.length || ohlc[0].h === null || ohlc[0].h === undefined) return nullArr();
+
+            const tr = nullArr(), plusDM = nullArr(), minusDM = nullArr();
+            for (let i = 1; i < len; i++) {
+                if (ohlc[i].h === null || ohlc[i-1].h === null) continue;
+                const upMove = ohlc[i].h - ohlc[i-1].h;
+                const downMove = ohlc[i-1].l - ohlc[i].l;
+                plusDM[i] = (upMove > downMove && upMove > 0) ? upMove : 0;
+                minusDM[i] = (downMove > upMove && downMove > 0) ? downMove : 0;
+                const prevClose = ohlc[i-1].c;
+                tr[i] = Math.max(ohlc[i].h - ohlc[i].l, Math.abs(ohlc[i].h - prevClose), Math.abs(ohlc[i].l - prevClose));
+            }
+
+            const smooth = (arr) => {
+                const out = nullArr();
+                let prev = null;
+                for (let i = 0; i < len; i++) {
+                    if (arr[i] === null) continue;
+                    if (prev === null) {
+                        const slice = arr.slice(Math.max(0, i - period + 1), i + 1).filter(x => x !== null);
+                        if (slice.length < period) continue;
+                        prev = slice.reduce((a,b)=>a+b, 0);
+                        out[i] = prev;
+                    } else {
+                        prev = prev - (prev / period) + arr[i];
+                        out[i] = prev;
+                    }
+                }
+                return out;
+            };
+
+            const sTR = smooth(tr), sPlusDM = smooth(plusDM), sMinusDM = smooth(minusDM);
+            const dx = nullArr();
+            for (let i = 0; i < len; i++) {
+                if (sTR[i] === null || sTR[i] === 0) continue;
+                const plusDI = 100 * sPlusDM[i] / sTR[i];
+                const minusDI = 100 * sMinusDM[i] / sTR[i];
+                const sum = plusDI + minusDI;
+                dx[i] = sum === 0 ? 0 : 100 * Math.abs(plusDI - minusDI) / sum;
+            }
+
+            const adx = nullArr();
+            let prevAdx = null;
+            const dxStart = dx.findIndex(x => x !== null);
+            if (dxStart === -1) return adx;
+            for (let i = dxStart; i < len; i++) {
+                if (dx[i] === null) continue;
+                if (prevAdx === null) {
+                    if (i < dxStart + period - 1) continue;
+                    const slice = dx.slice(dxStart, dxStart + period).filter(x => x !== null);
+                    if (!slice.length) continue;
+                    prevAdx = slice.reduce((a,b)=>a+b, 0) / slice.length;
+                    adx[i] = prevAdx;
+                } else {
+                    prevAdx = (prevAdx * (period - 1) + dx[i]) / period;
+                    adx[i] = prevAdx;
+                }
+            }
+            return adx;
+        }
+
+        // Simple signal: RSI + price-vs-SMA50 crossover, confirmed by SMA200 long-term trend
+        // and ADX trend strength. No external data dependencies (news/sentiment).
         function getSimpleSignal(prices, computed) {
             const i = prices.length - 1;
             const currentPrice = prices[i];
             const rsi = computed.rsi[i];
             const sma = computed.sma[i];
+            const sma200 = computed.sma200 ? computed.sma200[i] : null;
+            const adx = computed.adx ? computed.adx[i] : null;
             const reasons = [];
             let signal = 'HOLD';
 
@@ -665,10 +752,25 @@ Signal line = EMA(9) of MACD line</span>
             if (sma !== null) {
                 reasons.push(currentPrice > sma ? `Price above SMA${CONFIG.SMA_PERIOD}` : `Price below SMA${CONFIG.SMA_PERIOD}`);
             }
+            if (sma200 !== null) {
+                reasons.push(currentPrice > sma200 ? 'Long-term trend (SMA200) bullish' : 'Long-term trend (SMA200) bearish');
+            }
+            if (adx !== null) {
+                reasons.push(adx > 25 ? `Trend confirmed strong (ADX ${adx.toFixed(1)})` : `Trend weak/choppy (ADX ${adx.toFixed(1)}) — signal less reliable`);
+            }
 
             if (rsi !== null && sma !== null) {
                 if (rsi < 30 && currentPrice > sma) signal = 'BUY';
                 else if (rsi > 70 && currentPrice < sma) signal = 'SELL';
+            }
+
+            // Long-term trend confirmation: if SMA200 disagrees with the signal direction, flag it
+            // rather than overriding — this keeps the core rule unchanged but adds a visible caveat.
+            if (signal === 'BUY' && sma200 !== null && currentPrice < sma200) {
+                reasons.push('⚠ Caution: against the long-term (SMA200) downtrend');
+            }
+            if (signal === 'SELL' && sma200 !== null && currentPrice > sma200) {
+                reasons.push('⚠ Caution: against the long-term (SMA200) uptrend');
             }
 
             return { signal, reasons };
@@ -680,10 +782,12 @@ Signal line = EMA(9) of MACD line</span>
             const set = {
                 sma: getSMAArray(prices),
                 sma20: getSMAArray(prices, 20),
+                sma200: getSMAArray(prices, 200),
                 ema20: getEMAArray(prices, 20),
                 bb: getBBArray(prices),
                 rsi: getRSIArray(prices),
                 macd: getMACDArray(prices),
+                adx: getADXArray(ohlc || []),
             };
             set.composite = getSimpleSignal(prices, set);
             return set;
@@ -912,7 +1016,7 @@ Signal line = EMA(9) of MACD line</span>
         // Ensures per-ticker state objects exist, regardless of how the ticker entered the watchlist
         // (typed in, loaded from PIN sync, etc.) — guards against undefined access anywhere downstream.
         function ensureTickerState(ticker) {
-            if (!appState.indicators[ticker]) appState.indicators[ticker] = {sma:false, sma20:false, ema20:false, bb:false, rsi:false, macd:false};
+            if (!appState.indicators[ticker]) appState.indicators[ticker] = {sma:false, sma20:false, sma200:false, ema20:false, bb:false, rsi:false, macd:false};
             if (!appState.alerts[ticker]) appState.alerts[ticker] = [];
         }
 
@@ -1005,6 +1109,7 @@ Signal line = EMA(9) of MACD line</span>
                         <div class="indicator-toggles">
                             <button class="ind-btn ${inds.sma?'active':''}" onclick="toggleUI('${ticker}', 'ind', 'sma')">SMA 50</button>
                             <button class="ind-btn ${inds.sma20?'active':''}" onclick="toggleUI('${ticker}', 'ind', 'sma20')">SMA 20</button>
+                            <button class="ind-btn ${inds.sma200?'active':''}" onclick="toggleUI('${ticker}', 'ind', 'sma200')">SMA 200</button>
                             <button class="ind-btn ${inds.ema20?'active':''}" onclick="toggleUI('${ticker}', 'ind', 'ema20')">EMA 20</button>
                             <button class="ind-btn ${inds.bb?'active':''}" onclick="toggleUI('${ticker}', 'ind', 'bb')">BB</button>
                             <button class="ind-btn ${inds.rsi?'active':''}" onclick="toggleUI('${ticker}', 'ind', 'rsi')">RSI</button>
@@ -1070,6 +1175,7 @@ Signal line = EMA(9) of MACD line</span>
             const cSell = '#ff5c5c';
             const cSma = '#f5a623';
             const cSma20 = '#5ac8fa';
+            const cSma200 = '#ff9f7f';
             const cEma20 = '#a78bfa';
             const cBb = isLight ? 'rgba(0, 0, 0, 0.2)' : 'rgba(255, 255, 255, 0.3)';
             const cRsi = '#b58900';
@@ -1090,6 +1196,7 @@ Signal line = EMA(9) of MACD line</span>
 
             if(inds.sma && computed.sma) datasets.push({ label: 'SMA (50)', data: computed.sma.slice(-sl), borderColor: cSma, borderWidth: 1.5, borderDash: [5, 5], pointRadius: 0, yAxisID: 'y' });
             if(inds.sma20 && computed.sma20) datasets.push({ label: 'SMA (20)', data: computed.sma20.slice(-sl), borderColor: cSma20, borderWidth: 1.5, borderDash: [5, 5], pointRadius: 0, yAxisID: 'y' });
+            if(inds.sma200 && computed.sma200) datasets.push({ label: 'SMA (200)', data: computed.sma200.slice(-sl), borderColor: cSma200, borderWidth: 2, borderDash: [8, 4], pointRadius: 0, yAxisID: 'y' });
             if(inds.ema20 && computed.ema20) datasets.push({ label: 'EMA (20)', data: computed.ema20.slice(-sl), borderColor: cEma20, borderWidth: 1.5, pointRadius: 0, yAxisID: 'y' });
             if(inds.bb && computed.bb) { let bb = computed.bb; datasets.push({ label: 'BB Upper', data: bb.upper.slice(-sl), borderColor: cBb, borderWidth: 1, pointRadius: 0, yAxisID: 'y' }, { label: 'BB Lower', data: bb.lower.slice(-sl), borderColor: cBb, borderWidth: 1, pointRadius: 0, yAxisID: 'y' }); }
             
@@ -1112,6 +1219,7 @@ Signal line = EMA(9) of MACD line</span>
             legendItems.push({ name: 'Price', color: (prices[prices.length-1] >= prices[prices.length-2]) ? cBuy : cSell, value: fmt(prices[prices.length-1], 2) });
             if (inds.sma && computed.sma) legendItems.push({ name: 'SMA 50', color: cSma, value: fmt(lastValid(computed.sma), 2) });
             if (inds.sma20 && computed.sma20) legendItems.push({ name: 'SMA 20', color: cSma20, value: fmt(lastValid(computed.sma20), 2) });
+            if (inds.sma200 && computed.sma200) legendItems.push({ name: 'SMA 200', color: cSma200, value: fmt(lastValid(computed.sma200), 2) });
             if (inds.ema20 && computed.ema20) legendItems.push({ name: 'EMA 20', color: cEma20, value: fmt(lastValid(computed.ema20), 2) });
             if (inds.bb && computed.bb) {
                 legendItems.push({ name: 'BB Upper', color: cBb, value: fmt(lastValid(computed.bb.upper), 2) });
@@ -1121,6 +1229,12 @@ Signal line = EMA(9) of MACD line</span>
             if (inds.macd && computed.macd) {
                 legendItems.push({ name: 'MACD', color: cMacd, value: fmt(lastValid(computed.macd.macd), 2) });
                 legendItems.push({ name: 'Signal', color: '#859900', value: fmt(lastValid(computed.macd.signal), 2) });
+            }
+            // ADX always shown as context — trend strength regardless of which overlays are toggled
+            if (computed.adx) {
+                const adxVal = lastValid(computed.adx);
+                const adxColor = adxVal === null ? 'var(--text-sub)' : adxVal > 25 ? 'var(--buy-color)' : 'var(--sell-color)';
+                legendItems.push({ name: 'ADX', color: adxColor, value: adxVal === null ? '—' : adxVal.toFixed(1) });
             }
 
             const legendEl = document.getElementById(`legend-${ticker}`);
