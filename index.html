@@ -474,7 +474,7 @@
 
     <header>
         <div class="header-top">
-            <h1>Stock Tracker</h1>
+            <h1>My Portfolio</h1>
             <button class="theme-toggle" onclick="toggleTheme()" id="themeIcon">🌓</button>
         </div>
         <div class="search-bar">
@@ -1119,7 +1119,10 @@ Signal line = EMA(9) of MACD line</span>
                             <button class="ind-btn ${inds.macd?'active':''}" onclick="toggleUI('${ticker}', 'ind', 'macd')">MACD</button>
                         </div>
                         <div class="chart-legend-values" id="legend-${ticker}"></div>
-                        <div class="canvas-wrapper"><canvas id="canvas-${ticker}"></canvas></div>
+                        <div class="canvas-wrapper" style="position:relative;">
+                            <canvas id="canvas-candle-${ticker}" style="position:absolute;top:0;left:0;width:100%;height:100%;"></canvas>
+                            <canvas id="canvas-${ticker}" style="position:absolute;top:0;left:0;width:100%;height:100%;"></canvas>
+                        </div>
                     </div>
 
                     <!-- Panel: NEWS -->
@@ -1157,136 +1160,180 @@ Signal line = EMA(9) of MACD line</span>
 
         // --- Candlestick Chart Plugin (native, no external dependency) ---
         // Registers a custom 'candlestick' chart type with Chart.js once.
-        (function registerCandlestickChart() {
-            if (Chart.registry.controllers.get('candlestick')) return; // already registered
-
-            class CandlestickController extends Chart.DatasetController {}
-            CandlestickController.id = 'candlestick';
-            CandlestickController.defaults = { dataElementType: 'candlestick' };
-
-            class CandlestickElement extends Chart.Element {
-                draw(ctx) {
-                    const { x, open, high, low, close, width, bullColor, bearColor } = this.getProps(['x','open','high','low','close','width','bullColor','bearColor']);
-                    const isBull = close >= open;
-                    const color = isBull ? bullColor : bearColor;
-                    const top = Math.min(open, close);
-                    const bottom = Math.max(open, close);
-                    const bodyH = Math.max(1, bottom - top);
-                    const w = Math.max(1, width);
-
-                    ctx.save();
-                    ctx.strokeStyle = color;
-                    ctx.fillStyle = isBull ? color + '33' : color; // bullish = hollow fill, bearish = filled
-
-                    // Wick
-                    ctx.lineWidth = 1;
-                    ctx.beginPath();
-                    ctx.moveTo(x, high);
-                    ctx.lineTo(x, low);
-                    ctx.stroke();
-
-                    // Body
-                    ctx.lineWidth = 1;
-                    ctx.strokeRect(x - w/2, top, w, bodyH);
-                    ctx.fillRect(x - w/2, top, w, bodyH);
-                    ctx.restore();
-                }
-                inRange() { return false; }
-                inXRange() { return false; }
-                inYRange() { return false; }
-                getCenterPoint() { return { x: this.x, y: this.close }; }
-                getRange() { return 0; }
-            }
-            CandlestickElement.id = 'candlestick';
-            CandlestickElement.defaults = { bullColor: '#00d395', bearColor: '#ff5c5c', width: 6 };
-
-            CandlestickController.prototype.parseObjectData = function(meta, data, start, count) {
-                const parsed = [];
-                for (let i = start; i < start + count && i < data.length; i++) {
-                    const d = data[i];
-                    parsed.push({ x: i, open: d.o, high: d.h, low: d.l, close: d.c });
-                }
-                return parsed;
-            };
-            CandlestickController.prototype.getLabelAndValue = function(index) {
-                const d = this.getDataset().data[index];
-                return {
-                    label: this.chart.data.labels[index] || '',
-                    value: d ? `O:${d.o?.toFixed(2)} H:${d.h?.toFixed(2)} L:${d.l?.toFixed(2)} C:${d.c?.toFixed(2)}` : ''
-                };
-            };
-            CandlestickController.prototype.updateElement = function(el, index, properties, mode) {
-                const meta = this.getMeta();
-                const dataset = this.getDataset();
-                const parsed = this.getParsed(index);
-                const scale = this.chart.scales;
-                const yScale = scale[meta.yAxisID || 'y'];
-                const xScale = scale[meta.xAxisID || 'x'];
-
-                const x = xScale.getPixelForValue(index);
-                const bandWidth = xScale.width / (this.chart.data.labels.length || 1);
-                const width = Math.max(2, Math.min(12, bandWidth * 0.6));
-
-                properties.x = x;
-                properties.high = yScale.getPixelForValue(parsed.high);
-                properties.low = yScale.getPixelForValue(parsed.low);
-                properties.open = yScale.getPixelForValue(parsed.open);
-                properties.close = yScale.getPixelForValue(parsed.close);
-                properties.width = width;
-                properties.bullColor = CandlestickElement.defaults.bullColor;
-                properties.bearColor = CandlestickElement.defaults.bearColor;
-
-                Chart.DatasetController.prototype.updateElement.call(this, el, index, properties, mode);
-            };
-
-            Chart.register(CandlestickController, CandlestickElement);
-        })();
-
         // --- Price Action Indicators ---
-        // Pivot Points (Classic) — daily support/resistance levels traders watch.
-        // Returns { pp, r1, r2, s1, s2 } based on prior period's high/low/close.
         function getPivotPoints(ohlc) {
             if (!ohlc || ohlc.length < 2) return null;
             const prev = ohlc[ohlc.length - 2];
             if (!prev || prev.h === null) return null;
             const pp = (prev.h + prev.l + prev.c) / 3;
-            return {
-                pp: pp,
-                r1: 2 * pp - prev.l,
-                r2: pp + (prev.h - prev.l),
-                s1: 2 * pp - prev.h,
-                s2: pp - (prev.h - prev.l),
-            };
+            return { pp, r1: 2*pp - prev.l, r2: pp + (prev.h - prev.l), s1: 2*pp - prev.h, s2: pp - (prev.h - prev.l) };
         }
 
-        // Swing High/Low — local maxima/minima over a lookback window.
-        // Returns arrays of { index, price } for chart scatter points.
         function getSwingPoints(ohlc, lookback = 5) {
             const highs = [], lows = [];
             if (!ohlc || ohlc.length < lookback * 2 + 1) return { highs, lows };
             for (let i = lookback; i < ohlc.length - lookback; i++) {
                 const c = ohlc[i];
                 if (!c || c.h === null) continue;
-                const window = ohlc.slice(i - lookback, i + lookback + 1);
-                if (window.some(w => !w || w.h === null)) continue;
-                if (c.h >= Math.max(...window.map(w => w.h))) highs.push({ x: i, y: c.h });
-                if (c.l <= Math.min(...window.map(w => w.l))) lows.push({ x: i, y: c.l });
+                const win = ohlc.slice(i - lookback, i + lookback + 1);
+                if (win.some(w => !w || w.h === null)) continue;
+                if (c.h >= Math.max(...win.map(w => w.h))) highs.push({ x: i, y: c.h });
+                if (c.l <= Math.min(...win.map(w => w.l))) lows.push({ x: i, y: c.l });
             }
             return { highs, lows };
         }
 
         // --- Chart Drawing Logic ---
+        // Candlesticks, volume, pivots, swing markers drawn directly on canvas-candle-{ticker}
+        // using raw Canvas 2D — no Chart.js dependency, guaranteed visible.
+        // Overlay lines (SMA/BB/RSI/MACD) drawn on canvas-{ticker} via Chart.js (transparent bg).
+
+        function drawCandleCanvas(ticker, ohlc, dates, inds, isLight) {
+            const canvas = document.getElementById('canvas-candle-' + ticker);
+            if (!canvas || !ohlc || !ohlc.length) return;
+            const wrapper = canvas.parentElement;
+            const W = wrapper.clientWidth || 360;
+            const H = wrapper.clientHeight || 280;
+            canvas.width = W;
+            canvas.height = H;
+            const ctx = canvas.getContext('2d');
+            ctx.clearRect(0, 0, W, H);
+
+            const VOLUME_H = inds.volume ? Math.floor(H * 0.18) : 0;
+            const DATE_H = 16;
+            const CHART_H = H - VOLUME_H - DATE_H;
+            const PAD_R = 52;
+            const PAD_L = 4;
+            const CHART_W = W - PAD_L - PAD_R;
+            const n = ohlc.length;
+            const slotW = CHART_W / n;
+            const bodyW = Math.max(1, Math.min(10, slotW * 0.55));
+            const toX = (i) => PAD_L + (i + 0.5) * slotW;
+
+            // Price range from OHLC
+            const valid = ohlc.filter(c => c && c.h !== null);
+            if (!valid.length) return;
+            let pMax = Math.max(...valid.map(c => c.h));
+            let pMin = Math.min(...valid.map(c => c.l));
+            const pad = (pMax - pMin) * 0.06 || 1;
+            pMax += pad; pMin -= pad;
+            const pRange = pMax - pMin;
+            const toY = (p) => PAD_L + CHART_H * (1 - (p - pMin) / pRange);
+
+            // Grid + price axis
+            ctx.font = '10px -apple-system,sans-serif';
+            ctx.textAlign = 'right';
+            const gridSteps = 4;
+            for (let i = 0; i <= gridSteps; i++) {
+                const p = pMin + (pRange * i / gridSteps);
+                const y = toY(p);
+                ctx.strokeStyle = isLight ? '#e5e5ea' : '#1e1e2a';
+                ctx.lineWidth = 0.5;
+                ctx.beginPath(); ctx.moveTo(PAD_L, y); ctx.lineTo(W - PAD_R + 2, y); ctx.stroke();
+                ctx.fillStyle = isLight ? '#8e8e93' : '#666680';
+                ctx.fillText('$' + p.toFixed(2), W - 2, y + 3);
+            }
+
+            // Pivot lines
+            if (inds.pivot) {
+                const pv = getPivotPoints(ohlc);
+                if (pv) {
+                    const pvLevels = [
+                        { v: pv.r2, label: 'R2', color: '#ff5c5c' },
+                        { v: pv.r1, label: 'R1', color: '#ff9f7f' },
+                        { v: pv.pp, label: 'PP', color: isLight ? '#6060c8' : '#a0a0ff' },
+                        { v: pv.s1, label: 'S1', color: '#5ac8fa' },
+                        { v: pv.s2, label: 'S2', color: '#00d395' },
+                    ];
+                    pvLevels.forEach(({ v, label, color }) => {
+                        if (v < pMin || v > pMax) return;
+                        const y = toY(v);
+                        ctx.save();
+                        ctx.strokeStyle = color;
+                        ctx.lineWidth = 1;
+                        ctx.setLineDash([4, 4]);
+                        ctx.beginPath(); ctx.moveTo(PAD_L, y); ctx.lineTo(W - PAD_R, y); ctx.stroke();
+                        ctx.setLineDash([]);
+                        ctx.fillStyle = color;
+                        ctx.font = 'bold 9px -apple-system,sans-serif';
+                        ctx.textAlign = 'left';
+                        ctx.fillText(label, PAD_L + 3, y - 2);
+                        ctx.restore();
+                    });
+                }
+            }
+
+            // Candles
+            ohlc.forEach((c, i) => {
+                if (!c || c.h === null) return;
+                const isBull = c.c >= c.o;
+                const color = isBull ? '#00d395' : '#ff5c5c';
+                const x = toX(i);
+                ctx.strokeStyle = color;
+                ctx.lineWidth = 1;
+                // Wick
+                ctx.beginPath();
+                ctx.moveTo(x, toY(c.h));
+                ctx.lineTo(x, toY(c.l));
+                ctx.stroke();
+                // Body
+                const bodyTop = Math.min(toY(c.o), toY(c.c));
+                const bodyH = Math.max(1, Math.abs(toY(c.c) - toY(c.o)));
+                ctx.fillStyle = isBull ? 'rgba(0,211,149,0.35)' : color;
+                ctx.fillRect(x - bodyW/2, bodyTop, bodyW, bodyH);
+                ctx.strokeRect(x - bodyW/2, bodyTop, bodyW, bodyH);
+            });
+
+            // Swing markers
+            if (inds.swing) {
+                const { highs, lows } = getSwingPoints(ohlc);
+                const tri = (x, y, up, color) => {
+                    ctx.save();
+                    ctx.fillStyle = color;
+                    ctx.beginPath();
+                    const s = 5, off = 6;
+                    if (up) { ctx.moveTo(x, y-off-s*1.5); ctx.lineTo(x-s, y-off); ctx.lineTo(x+s, y-off); }
+                    else    { ctx.moveTo(x, y+off+s*1.5); ctx.lineTo(x-s, y+off); ctx.lineTo(x+s, y+off); }
+                    ctx.closePath(); ctx.fill(); ctx.restore();
+                };
+                highs.forEach(p => { if (p.x < n) tri(toX(p.x), toY(p.y), false, '#ff5c5c'); });
+                lows.forEach(p => { if (p.x < n) tri(toX(p.x), toY(p.y), true, '#00d395'); });
+            }
+
+            // Volume bars
+            if (inds.volume && VOLUME_H > 0) {
+                const maxVol = Math.max(...ohlc.map(c => c?.v || 0)) || 1;
+                const volY = CHART_H + DATE_H/2;
+                ohlc.forEach((c, i) => {
+                    if (!c || !c.v) return;
+                    const bh = (c.v / maxVol) * (VOLUME_H - 4);
+                    const x = toX(i);
+                    ctx.fillStyle = c.c >= c.o ? 'rgba(0,211,149,0.28)' : 'rgba(255,92,92,0.28)';
+                    ctx.fillRect(x - bodyW/2, volY + VOLUME_H - 4 - bh, bodyW, bh);
+                });
+                ctx.fillStyle = isLight ? '#8e8e93' : '#666680';
+                ctx.font = '9px -apple-system,sans-serif';
+                ctx.textAlign = 'right';
+                ctx.fillText('Vol', W - 2, H - 2);
+            }
+
+            // Date labels
+            ctx.fillStyle = isLight ? '#8e8e93' : '#666680';
+            ctx.font = '9px -apple-system,sans-serif';
+            ctx.textAlign = 'center';
+            const every = Math.max(1, Math.floor(n / 8));
+            dates.forEach((d, i) => { if (i % every === 0) ctx.fillText(d, toX(i), CHART_H + DATE_H - 2); });
+        }
+
         function drawChart(ticker) {
             const data = appState.dataCache[ticker];
             if (!data || !Array.isArray(data.prices) || !data.prices.length || !data.computed) return;
-
-            const canvas = document.getElementById(`canvas-${ticker}`);
+            const canvas = document.getElementById('canvas-' + ticker);
             if (!canvas) return;
-            const ctx = canvas.getContext('2d');
-
             ensureTickerState(ticker);
             const inds = appState.indicators[ticker];
             const computed = data.computed;
+            const isLight = document.body.classList.contains('light-mode');
 
             const sl = Math.min(CONFIG.CHART_WINDOW_DAYS, data.prices.length);
             const prices = data.prices.slice(-sl);
@@ -1294,212 +1341,108 @@ Signal line = EMA(9) of MACD line</span>
             const ohlc = (data.ohlc || []).slice(-sl);
             if (!prices.length) return;
 
-            const isLight = document.body.classList.contains('light-mode');
-            const cBuy = '#00d395';
-            const cSell = '#ff5c5c';
-            const cSma = '#f5a623';
-            const cSma20 = '#5ac8fa';
-            const cSma200 = '#ff9f7f';
-            const cEma20 = '#a78bfa';
-            const cBb = isLight ? 'rgba(0,0,0,0.2)' : 'rgba(255,255,255,0.3)';
-            const cRsi = '#b58900';
-            const cMacd = '#d33682';
-            const cPivot = isLight ? 'rgba(100,100,200,0.6)' : 'rgba(180,180,255,0.6)';
-            const gridColor = isLight ? '#e5e5ea' : '#222222';
-            const tickColor = isLight ? '#8e8e93' : '#888888';
-            const tooltipBg = isLight ? 'rgba(255,255,255,0.95)' : 'rgba(28,28,30,0.95)';
-            const tooltipText = isLight ? '#000000' : '#ffffff';
-
-            // Use candlesticks if OHLC is available, otherwise fall back to line chart
             const hasOhlc = ohlc.length === prices.length && ohlc.some(c => c && c.h !== null);
 
-            let datasets = [];
-
+            // Draw candlesticks on background canvas
             if (hasOhlc) {
-                datasets.push({
-                    type: 'candlestick',
-                    label: 'Price',
-                    data: ohlc.map(c => ({ o: c.o, h: c.h, l: c.l, c: c.c })),
-                    yAxisID: 'y',
-                    order: 2,
-                });
-            } else {
-                datasets.push({
-                    type: 'line',
-                    label: 'Price',
-                    data: prices,
-                    borderColor: (prices[prices.length-1] >= prices[prices.length-2]) ? cBuy : cSell,
-                    borderWidth: 2, pointRadius: 0, fill: false, tension: 0.1, yAxisID: 'y', order: 2,
-                });
+                drawCandleCanvas(ticker, ohlc, dates, inds, isLight);
             }
 
-            // Volume bars (secondary y-axis, bottom 20% of chart via max scaling)
-            if (hasOhlc && inds.volume) {
-                const volumes = ohlc.map((c, i) => ({
-                    x: i,
-                    y: c.v || 0,
-                    backgroundColor: (c.c >= c.o) ? 'rgba(0,211,149,0.25)' : 'rgba(255,92,92,0.25)',
-                }));
-                datasets.push({
-                    type: 'bar',
-                    label: 'Volume',
-                    data: ohlc.map(c => c.v || 0),
-                    backgroundColor: ohlc.map(c => (c.c >= c.o) ? 'rgba(0,211,149,0.25)' : 'rgba(255,92,92,0.25)'),
-                    yAxisID: 'yVol',
-                    order: 3,
-                });
-            }
+            // Overlay colors
+            const cSma = '#f5a623', cSma20 = '#5ac8fa', cSma200 = '#ff9f7f', cEma20 = '#a78bfa';
+            const cBb = isLight ? 'rgba(0,0,0,0.25)' : 'rgba(255,255,255,0.35)';
+            const cRsi = '#b58900', cMacd = '#d33682';
+            const tickColor = isLight ? '#8e8e93' : '#666680';
+            const tooltipBg = isLight ? 'rgba(255,255,255,0.95)' : 'rgba(17,17,24,0.95)';
+            const tooltipText = isLight ? '#000' : '#fff';
+            const gridColor = isLight ? '#e5e5ea' : '#1e1e2a';
 
-            // MA overlays
-            if (inds.sma && computed.sma) datasets.push({ type:'line', label:'SMA 50', data: computed.sma.slice(-sl), borderColor: cSma, borderWidth: 1.5, borderDash:[5,5], pointRadius:0, yAxisID:'y', order:1 });
-            if (inds.sma20 && computed.sma20) datasets.push({ type:'line', label:'SMA 20', data: computed.sma20.slice(-sl), borderColor: cSma20, borderWidth: 1.5, borderDash:[5,5], pointRadius:0, yAxisID:'y', order:1 });
-            if (inds.sma200 && computed.sma200) datasets.push({ type:'line', label:'SMA 200', data: computed.sma200.slice(-sl), borderColor: cSma200, borderWidth: 2, borderDash:[8,4], pointRadius:0, yAxisID:'y', order:1 });
-            if (inds.ema20 && computed.ema20) datasets.push({ type:'line', label:'EMA 20', data: computed.ema20.slice(-sl), borderColor: cEma20, borderWidth: 1.5, pointRadius:0, yAxisID:'y', order:1 });
+            let datasets = [];
+            if (!hasOhlc) {
+                datasets.push({ label:'Price', data:prices,
+                    borderColor: prices[prices.length-1] >= prices[prices.length-2] ? '#00d395' : '#ff5c5c',
+                    borderWidth:2, pointRadius:0, fill:false, tension:0.1, yAxisID:'y' });
+            }
+            if (inds.sma && computed.sma) datasets.push({ label:'SMA 50', data:computed.sma.slice(-sl), borderColor:cSma, borderWidth:1.5, borderDash:[5,5], pointRadius:0, yAxisID:'y' });
+            if (inds.sma20 && computed.sma20) datasets.push({ label:'SMA 20', data:computed.sma20.slice(-sl), borderColor:cSma20, borderWidth:1.5, borderDash:[5,5], pointRadius:0, yAxisID:'y' });
+            if (inds.sma200 && computed.sma200) datasets.push({ label:'SMA 200', data:computed.sma200.slice(-sl), borderColor:cSma200, borderWidth:2, borderDash:[8,4], pointRadius:0, yAxisID:'y' });
+            if (inds.ema20 && computed.ema20) datasets.push({ label:'EMA 20', data:computed.ema20.slice(-sl), borderColor:cEma20, borderWidth:1.5, pointRadius:0, yAxisID:'y' });
             if (inds.bb && computed.bb) {
-                datasets.push({ type:'line', label:'BB Upper', data: computed.bb.upper.slice(-sl), borderColor: cBb, borderWidth:1, pointRadius:0, yAxisID:'y', order:1 });
-                datasets.push({ type:'line', label:'BB Lower', data: computed.bb.lower.slice(-sl), borderColor: cBb, borderWidth:1, pointRadius:0, yAxisID:'y', order:1 });
+                datasets.push({ label:'BB Upper', data:computed.bb.upper.slice(-sl), borderColor:cBb, borderWidth:1, pointRadius:0, yAxisID:'y' });
+                datasets.push({ label:'BB Lower', data:computed.bb.lower.slice(-sl), borderColor:cBb, borderWidth:1, pointRadius:0, yAxisID:'y' });
             }
-
-            // Pivot points — horizontal lines across the visible window
-            if (inds.pivot && hasOhlc) {
-                const pivots = getPivotPoints(ohlc);
-                if (pivots) {
-                    const pLine = (label, value, dash) => ({
-                        type: 'line', label, data: new Array(sl).fill(value),
-                        borderColor: cPivot, borderWidth: 1, borderDash: dash || [], pointRadius: 0, yAxisID: 'y', order: 1,
-                    });
-                    datasets.push(pLine(`R2 ${pivots.r2.toFixed(2)}`, pivots.r2, [4,4]));
-                    datasets.push(pLine(`R1 ${pivots.r1.toFixed(2)}`, pivots.r1, [4,4]));
-                    datasets.push(pLine(`PP ${pivots.pp.toFixed(2)}`, pivots.pp, []));
-                    datasets.push(pLine(`S1 ${pivots.s1.toFixed(2)}`, pivots.s1, [4,4]));
-                    datasets.push(pLine(`S2 ${pivots.s2.toFixed(2)}`, pivots.s2, [4,4]));
-                }
-            }
-
-            // Swing high/low scatter markers
-            if (inds.swing && hasOhlc) {
-                const { highs, lows } = getSwingPoints(ohlc);
-                if (highs.length) datasets.push({
-                    type: 'scatter', label: 'Swing High',
-                    data: highs.map(p => ({ x: p.x, y: p.y })),
-                    backgroundColor: cSell, pointRadius: 4, pointStyle: 'triangle', rotation: 0, yAxisID: 'y', order: 0,
-                });
-                if (lows.length) datasets.push({
-                    type: 'scatter', label: 'Swing Low',
-                    data: lows.map(p => ({ x: p.x, y: p.y })),
-                    backgroundColor: cBuy, pointRadius: 4, pointStyle: 'triangle', rotation: 180, yAxisID: 'y', order: 0,
-                });
-            }
-
-            // Oscillators
-            let hasOscillator = inds.rsi || inds.macd;
-            if (inds.rsi && computed.rsi) datasets.push({ type:'line', label:'RSI', data: computed.rsi.slice(-sl), borderColor: cRsi, borderWidth:1.5, pointRadius:0, yAxisID:'y2', spanGaps:true });
+            const hasOscillator = inds.rsi || inds.macd;
+            if (inds.rsi && computed.rsi) datasets.push({ label:'RSI', data:computed.rsi.slice(-sl), borderColor:cRsi, borderWidth:1.5, pointRadius:0, yAxisID:'y2', spanGaps:true });
             if (inds.macd && computed.macd) {
-                datasets.push({ type:'line', label:'MACD', data: computed.macd.macd.slice(-sl), borderColor: cMacd, borderWidth:1.5, pointRadius:0, yAxisID:'y2', spanGaps:true });
-                datasets.push({ type:'line', label:'Signal', data: computed.macd.signal.slice(-sl), borderColor:'#859900', borderWidth:1, pointRadius:0, yAxisID:'y2', spanGaps:true });
+                datasets.push({ label:'MACD', data:computed.macd.macd.slice(-sl), borderColor:cMacd, borderWidth:1.5, pointRadius:0, yAxisID:'y2', spanGaps:true });
+                datasets.push({ label:'Signal', data:computed.macd.signal.slice(-sl), borderColor:'#859900', borderWidth:1, pointRadius:0, yAxisID:'y2', spanGaps:true });
             }
 
-            // Legend values
-            const lastValid = (arr) => {
-                if (!arr || !arr.length) return null;
-                for (let i = arr.length-1; i >= 0; i--) {
-                    if (arr[i] !== null && arr[i] !== undefined && !Number.isNaN(arr[i])) return arr[i];
-                }
-                return null;
-            };
-            const fmt = (v, d) => v === null ? '—' : v.toFixed(d);
-            const lastCandle = hasOhlc ? ohlc[ohlc.length-1] : null;
-
-            let legendItems = [];
-            if (lastCandle) {
-                legendItems.push({ name: 'O', color: tickColor, value: fmt(lastCandle.o, 2) });
-                legendItems.push({ name: 'H', color: cBuy, value: fmt(lastCandle.h, 2) });
-                legendItems.push({ name: 'L', color: cSell, value: fmt(lastCandle.l, 2) });
-                legendItems.push({ name: 'C', color: (lastCandle.c >= lastCandle.o) ? cBuy : cSell, value: fmt(lastCandle.c, 2) });
-                if (inds.volume && lastCandle.v) legendItems.push({ name: 'Vol', color: tickColor, value: (lastCandle.v / 1e6).toFixed(2) + 'M' });
-            } else {
-                legendItems.push({ name: 'Price', color: cBuy, value: fmt(prices[prices.length-1], 2) });
-            }
-            if (inds.sma && computed.sma) legendItems.push({ name: 'SMA 50', color: cSma, value: fmt(lastValid(computed.sma), 2) });
-            if (inds.sma20 && computed.sma20) legendItems.push({ name: 'SMA 20', color: cSma20, value: fmt(lastValid(computed.sma20), 2) });
-            if (inds.sma200 && computed.sma200) legendItems.push({ name: 'SMA 200', color: cSma200, value: fmt(lastValid(computed.sma200), 2) });
-            if (inds.ema20 && computed.ema20) legendItems.push({ name: 'EMA 20', color: cEma20, value: fmt(lastValid(computed.ema20), 2) });
-            if (inds.bb && computed.bb) {
-                legendItems.push({ name: 'BB↑', color: cBb, value: fmt(lastValid(computed.bb.upper), 2) });
-                legendItems.push({ name: 'BB↓', color: cBb, value: fmt(lastValid(computed.bb.lower), 2) });
-            }
-            if (inds.rsi && computed.rsi) legendItems.push({ name: 'RSI', color: cRsi, value: fmt(lastValid(computed.rsi), 1) });
-            if (inds.macd && computed.macd) {
-                legendItems.push({ name: 'MACD', color: cMacd, value: fmt(lastValid(computed.macd.macd), 2) });
-                legendItems.push({ name: 'Sig', color: '#859900', value: fmt(lastValid(computed.macd.signal), 2) });
-            }
-            if (computed.adx) {
-                const adxVal = lastValid(computed.adx);
-                legendItems.push({ name: 'ADX', color: adxVal !== null && adxVal > 25 ? cBuy : cSell, value: adxVal === null ? '—' : adxVal.toFixed(1) });
+            // Price scale aligned to OHLC range so overlays align with candles
+            let yMin, yMax;
+            if (hasOhlc) {
+                const valid = ohlc.filter(c => c && c.h !== null);
+                yMax = Math.max(...valid.map(c => c.h));
+                yMin = Math.min(...valid.map(c => c.l));
+                const pad = (yMax - yMin) * 0.06 || 1;
+                yMax += pad; yMin -= pad;
             }
 
-            const legendEl = document.getElementById(`legend-${ticker}`);
-            if (legendEl) {
-                legendEl.innerHTML = legendItems.map(item => `
-                    <span class="legend-item">
-                        <span class="legend-dot" style="background:${item.color}"></span>
-                        <span class="legend-name">${item.name}</span>
-                        <span class="legend-value">${item.value}</span>
-                    </span>
-                `).join('');
-            }
-
-            // Scales
             let scales = {
-                x: { display: true, ticks: { color: tickColor, maxRotation: 0, autoSkip: true, maxTicksLimit: 10 }, grid: { display: false } },
-                y: { type: 'linear', position: 'right', ticks: { color: tickColor }, grid: { color: gridColor } },
+                x: { display: !hasOhlc, ticks:{ color:tickColor, maxRotation:0, autoSkip:true, maxTicksLimit:10 }, grid:{ display:false } },
+                y: { type:'linear', position:'right', display:!hasOhlc,
+                     min:yMin, max:yMax,
+                     ticks:{ color:tickColor }, grid:{ color: hasOhlc ? 'transparent' : gridColor } },
             };
-            if (inds.volume && hasOhlc) {
-                // Volume axis: max = 5× actual max so bars only occupy bottom ~20% of chart
-                const maxVol = Math.max(...ohlc.map(c => c.v || 0));
-                scales.yVol = { type: 'linear', position: 'left', display: false, max: maxVol * 5, min: 0, grid: { display: false } };
+            if (hasOhlc) {
+                // Hidden y scale still needed so overlay lines get correct pixel positions
+                scales.y = { type:'linear', position:'right', display:false, min:yMin, max:yMax, grid:{ display:false } };
             }
             if (hasOscillator) {
-                scales.y2 = {
-                    type: 'linear', position: 'left',
-                    ticks: { color: tickColor },
-                    grid: { display: false },
-                    min: (inds.rsi && !inds.macd) ? 0 : undefined,
-                    max: (inds.rsi && !inds.macd) ? 100 : undefined,
-                };
+                scales.y2 = { type:'linear', position:'left', ticks:{ color:tickColor }, grid:{ display:false },
+                    min:(inds.rsi&&!inds.macd)?0:undefined, max:(inds.rsi&&!inds.macd)?100:undefined };
             }
 
+            canvas.style.background = 'transparent';
             if (window.myCharts[ticker]) window.myCharts[ticker].destroy();
-            window.myCharts[ticker] = new Chart(ctx, {
-                type: 'bar', // base type — individual datasets override with their own type
-                data: { labels: dates, datasets },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    interaction: { mode: 'index', intersect: false },
-                    animation: false, // disable animation for snappier indicator toggling
-                    plugins: {
-                        legend: { display: false },
-                        tooltip: {
-                            padding: 10,
-                            backgroundColor: tooltipBg,
-                            titleColor: tooltipText,
-                            bodyColor: tooltipText,
-                            callbacks: {
-                                label: (ctx) => {
-                                    const d = ctx.dataset;
-                                    if (d.type === 'candlestick' && d.data[ctx.dataIndex]) {
-                                        const c = d.data[ctx.dataIndex];
-                                        return `O:${c.o?.toFixed(2)} H:${c.h?.toFixed(2)} L:${c.l?.toFixed(2)} C:${c.c?.toFixed(2)}`;
-                                    }
-                                    return `${d.label}: ${typeof ctx.parsed.y === 'number' ? ctx.parsed.y.toFixed(2) : ctx.raw}`;
-                                }
-                            }
-                        },
-                    },
-                    scales,
-                },
-            });
+
+            if (datasets.length > 0) {
+                window.myCharts[ticker] = new Chart(canvas.getContext('2d'), {
+                    type:'line', data:{ labels:dates, datasets },
+                    options:{ responsive:true, maintainAspectRatio:false, animation:false,
+                        interaction:{ mode:'index', intersect:false },
+                        plugins:{ legend:{ display:false },
+                            tooltip:{ padding:10, backgroundColor:tooltipBg, titleColor:tooltipText, bodyColor:tooltipText } },
+                        scales },
+                });
+            }
+
+            // Legend
+            const lastValid = (arr) => {
+                if (!arr?.length) return null;
+                for (let i=arr.length-1; i>=0; i--) { if (arr[i]!==null&&arr[i]!==undefined&&!isNaN(arr[i])) return arr[i]; }
+                return null;
+            };
+            const fmt = (v,d) => v===null?'—':Number(v).toFixed(d);
+            const last = ohlc.length ? ohlc[ohlc.length-1] : null;
+            let items = [];
+            if (last?.o !== null && last?.o !== undefined) {
+                items.push({ name:'O', color:tickColor, value:fmt(last.o,2) });
+                items.push({ name:'H', color:'#00d395', value:fmt(last.h,2) });
+                items.push({ name:'L', color:'#ff5c5c', value:fmt(last.l,2) });
+                items.push({ name:'C', color:last.c>=last.o?'#00d395':'#ff5c5c', value:fmt(last.c,2) });
+                if (inds.volume&&last.v) items.push({ name:'Vol', color:tickColor, value:(last.v/1e6).toFixed(2)+'M' });
+            } else { items.push({ name:'Price', color:'#00d395', value:fmt(prices[prices.length-1],2) }); }
+            if (inds.sma&&computed.sma) items.push({ name:'SMA50', color:cSma, value:fmt(lastValid(computed.sma),2) });
+            if (inds.sma20&&computed.sma20) items.push({ name:'SMA20', color:cSma20, value:fmt(lastValid(computed.sma20),2) });
+            if (inds.sma200&&computed.sma200) items.push({ name:'SMA200', color:cSma200, value:fmt(lastValid(computed.sma200),2) });
+            if (inds.ema20&&computed.ema20) items.push({ name:'EMA20', color:cEma20, value:fmt(lastValid(computed.ema20),2) });
+            if (inds.bb&&computed.bb) { items.push({ name:'BB↑', color:cBb, value:fmt(lastValid(computed.bb.upper),2) }); items.push({ name:'BB↓', color:cBb, value:fmt(lastValid(computed.bb.lower),2) }); }
+            if (inds.rsi&&computed.rsi) items.push({ name:'RSI', color:cRsi, value:fmt(lastValid(computed.rsi),1) });
+            if (inds.macd&&computed.macd) { items.push({ name:'MACD', color:cMacd, value:fmt(lastValid(computed.macd.macd),2) }); items.push({ name:'Sig', color:'#859900', value:fmt(lastValid(computed.macd.signal),2) }); }
+            if (computed.adx) { const v=lastValid(computed.adx); items.push({ name:'ADX', color:v!==null&&v>25?'#00d395':'#ff5c5c', value:v===null?'—':v.toFixed(1) }); }
+            const legendEl = document.getElementById('legend-' + ticker);
+            if (legendEl) legendEl.innerHTML = items.map(it=>`<span class="legend-item"><span class="legend-dot" style="background:${it.color}"></span><span class="legend-name">${it.name}</span><span class="legend-value">${it.value}</span></span>`).join('');
         }
 
         // --- App Interactions ---
