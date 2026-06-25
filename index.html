@@ -326,7 +326,23 @@
             background: var(--accent-dim);
         }
 
-        /* Chart legend with live values */
+        /* Crosshair tooltip */
+        .crosshair-tooltip {
+            font-size: 0.74rem;
+            background: var(--card-bg);
+            border: 1px solid var(--card-border);
+            border-radius: 10px;
+            padding: 8px 12px;
+            margin-bottom: 8px;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px 14px;
+            line-height: 1.4;
+        }
+        .xhair-item { display: flex; align-items: center; gap: 4px; }
+        .xhair-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+        .xhair-name { color: var(--text-sub); font-weight: 600; }
+        .xhair-val { color: var(--text-main); font-weight: 700; }
         .chart-legend-values {
             display: flex;
             flex-wrap: wrap;
@@ -474,7 +490,7 @@
 
     <header>
         <div class="header-top">
-            <h1>My Portfolio</h1>
+            <h1>Stockz Tracker</h1>
             <button class="theme-toggle" onclick="toggleTheme()" id="themeIcon">🌓</button>
         </div>
         <div class="search-bar">
@@ -1119,9 +1135,11 @@ Signal line = EMA(9) of MACD line</span>
                             <button class="ind-btn ${inds.macd?'active':''}" onclick="toggleUI('${ticker}', 'ind', 'macd')">MACD</button>
                         </div>
                         <div class="chart-legend-values" id="legend-${ticker}"></div>
+                        <div class="crosshair-tooltip" id="xhair-${ticker}" style="display:none;"></div>
                         <div class="canvas-wrapper" style="position:relative;">
                             <canvas id="canvas-candle-${ticker}" style="position:absolute;top:0;left:0;width:100%;height:100%;"></canvas>
                             <canvas id="canvas-${ticker}" style="position:absolute;top:0;left:0;width:100%;height:100%;"></canvas>
+                            <canvas id="canvas-cross-${ticker}" style="position:absolute;top:0;left:0;width:100%;height:100%;cursor:crosshair;"></canvas>
                         </div>
                     </div>
 
@@ -1443,6 +1461,118 @@ Signal line = EMA(9) of MACD line</span>
             if (computed.adx) { const v=lastValid(computed.adx); items.push({ name:'ADX', color:v!==null&&v>25?'#00d395':'#ff5c5c', value:v===null?'—':v.toFixed(1) }); }
             const legendEl = document.getElementById('legend-' + ticker);
             if (legendEl) legendEl.innerHTML = items.map(it=>`<span class="legend-item"><span class="legend-dot" style="background:${it.color}"></span><span class="legend-name">${it.name}</span><span class="legend-value">${it.value}</span></span>`).join('');
+
+            // --- Crosshair / Scrubber ---
+            // Top-layer transparent canvas captures pointer/touch events and draws
+            // a vertical crosshair line + shows all indicator values at the hovered candle.
+            const crossCanvas = document.getElementById('canvas-cross-' + ticker);
+            if (!crossCanvas) return;
+
+            // Store layout params so the event handler can convert pointer X → candle index
+            const wrapper = crossCanvas.parentElement;
+            const layoutW = wrapper.clientWidth || 360;
+            const layoutH = wrapper.clientHeight || 280;
+            crossCanvas.width = layoutW;
+            crossCanvas.height = layoutH;
+            const VOLUME_H = inds.volume && hasOhlc ? Math.floor(layoutH * 0.18) : 0;
+            const DATE_H = 16;
+            const CHART_H = layoutH - VOLUME_H - DATE_H;
+            const PAD_R = 52;
+            const PAD_L = 4;
+            const CHART_W = layoutW - PAD_L - PAD_R;
+            const slotW2 = CHART_W / (ohlc.length || prices.length);
+
+            const xToIndex = (clientX) => {
+                const rect = crossCanvas.getBoundingClientRect();
+                const px = (clientX - rect.left) * (layoutW / rect.width);
+                const i = Math.round((px - PAD_L) / slotW2 - 0.5);
+                return Math.max(0, Math.min((ohlc.length || prices.length) - 1, i));
+            };
+
+            const drawCrosshair = (clientX) => {
+                const ctx2 = crossCanvas.getContext('2d');
+                ctx2.clearRect(0, 0, layoutW, layoutH);
+                const idx = xToIndex(clientX);
+                const x = PAD_L + (idx + 0.5) * slotW2;
+
+                // Vertical line
+                ctx2.strokeStyle = isLight ? 'rgba(0,0,0,0.25)' : 'rgba(255,255,255,0.25)';
+                ctx2.lineWidth = 1;
+                ctx2.setLineDash([4, 3]);
+                ctx2.beginPath();
+                ctx2.moveTo(x, 0);
+                ctx2.lineTo(x, CHART_H + VOLUME_H);
+                ctx2.stroke();
+                ctx2.setLineDash([]);
+
+                // Date label at bottom of crosshair
+                const dateLabel = dates[idx] || '';
+                ctx2.font = 'bold 10px -apple-system,sans-serif';
+                ctx2.textAlign = 'center';
+                const dateLabelW = ctx2.measureText(dateLabel).width + 10;
+                const dateLabelX = Math.max(dateLabelW/2 + PAD_L, Math.min(layoutW - PAD_R - dateLabelW/2, x));
+                ctx2.fillStyle = isLight ? '#333' : '#ccc';
+                ctx2.fillRect(dateLabelX - dateLabelW/2, CHART_H + 1, dateLabelW, DATE_H - 2);
+                ctx2.fillStyle = isLight ? '#fff' : '#111';
+                ctx2.fillText(dateLabel, dateLabelX, CHART_H + DATE_H - 4);
+
+                // Build tooltip values
+                const fmt2 = (v, d=2) => (v===null||v===undefined||isNaN(v)) ? '—' : Number(v).toFixed(d);
+                const c = hasOhlc ? ohlc[idx] : null;
+                const tooltipEl = document.getElementById('xhair-' + ticker);
+                if (!tooltipEl) return;
+
+                const parts = [];
+                parts.push({ name: 'Date', color: isLight ? '#333' : '#ccc', val: dateLabel });
+                if (c && c.o !== null) {
+                    parts.push({ name: 'O', color: '#888', val: fmt2(c.o) });
+                    parts.push({ name: 'H', color: '#00d395', val: fmt2(c.h) });
+                    parts.push({ name: 'L', color: '#ff5c5c', val: fmt2(c.l) });
+                    parts.push({ name: 'C', color: c.c >= c.o ? '#00d395' : '#ff5c5c', val: fmt2(c.c) });
+                    if (inds.volume && c.v) parts.push({ name: 'Vol', color: '#888', val: (c.v/1e6).toFixed(2)+'M' });
+                } else {
+                    parts.push({ name: 'Price', color: '#00d395', val: fmt2(prices[idx]) });
+                }
+                const getAt = (arr, i) => (arr && arr[i] !== undefined) ? arr[i] : null;
+                if (inds.sma && computed.sma) parts.push({ name:'SMA50', color:'#f5a623', val:fmt2(getAt(computed.sma.slice(-sl), idx)) });
+                if (inds.sma20 && computed.sma20) parts.push({ name:'SMA20', color:'#5ac8fa', val:fmt2(getAt(computed.sma20.slice(-sl), idx)) });
+                if (inds.sma200 && computed.sma200) parts.push({ name:'SMA200', color:'#ff9f7f', val:fmt2(getAt(computed.sma200.slice(-sl), idx)) });
+                if (inds.ema20 && computed.ema20) parts.push({ name:'EMA20', color:'#a78bfa', val:fmt2(getAt(computed.ema20.slice(-sl), idx)) });
+                if (inds.bb && computed.bb) {
+                    parts.push({ name:'BB↑', color:'rgba(180,180,255,0.8)', val:fmt2(getAt(computed.bb.upper.slice(-sl), idx)) });
+                    parts.push({ name:'BB↓', color:'rgba(180,180,255,0.8)', val:fmt2(getAt(computed.bb.lower.slice(-sl), idx)) });
+                }
+                if (inds.rsi && computed.rsi) parts.push({ name:'RSI', color:'#b58900', val:fmt2(getAt(computed.rsi.slice(-sl), idx), 1) });
+                if (inds.macd && computed.macd) {
+                    parts.push({ name:'MACD', color:'#d33682', val:fmt2(getAt(computed.macd.macd.slice(-sl), idx)) });
+                    parts.push({ name:'Sig', color:'#859900', val:fmt2(getAt(computed.macd.signal.slice(-sl), idx)) });
+                }
+
+                tooltipEl.style.display = 'flex';
+                tooltipEl.innerHTML = parts.map(p =>
+                    `<span class="xhair-item"><span class="xhair-dot" style="background:${p.color}"></span><span class="xhair-name">${p.name}</span><span class="xhair-val">${p.val}</span></span>`
+                ).join('');
+            };
+
+            const clearCrosshair = () => {
+                const ctx2 = crossCanvas.getContext('2d');
+                ctx2.clearRect(0, 0, layoutW, layoutH);
+                const tooltipEl = document.getElementById('xhair-' + ticker);
+                if (tooltipEl) tooltipEl.style.display = 'none';
+            };
+
+            // Remove old listeners by cloning the element
+            const newCross = crossCanvas.cloneNode(true);
+            crossCanvas.parentNode.replaceChild(newCross, crossCanvas);
+
+            // Mouse events
+            newCross.addEventListener('mousemove', (e) => drawCrosshair(e.clientX));
+            newCross.addEventListener('mouseleave', clearCrosshair);
+
+            // Touch events (mobile scrubber)
+            newCross.addEventListener('touchstart', (e) => { e.preventDefault(); drawCrosshair(e.touches[0].clientX); }, { passive: false });
+            newCross.addEventListener('touchmove', (e) => { e.preventDefault(); drawCrosshair(e.touches[0].clientX); }, { passive: false });
+            newCross.addEventListener('touchend', () => setTimeout(clearCrosshair, 1500));
         }
 
         // --- App Interactions ---
