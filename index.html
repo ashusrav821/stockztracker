@@ -71,7 +71,7 @@
 
         /* ---- HEADER ---- */
         header {
-            padding: 52px 18px 0;
+            padding: 48px 14px 0;
             background: var(--header-bg);
             border-bottom: 1px solid var(--divider);
             position: sticky;
@@ -83,73 +83,79 @@
             display: flex;
             justify-content: space-between;
             align-items: center;
-            margin-bottom: 16px;
+            margin-bottom: 10px;
+            gap: 10px;
         }
 
         h1 {
             margin: 0;
-            font-size: 1.5rem;
+            font-size: 1.2rem;
             font-weight: 800;
-            letter-spacing: -0.6px;
+            letter-spacing: -0.4px;
             color: var(--text-main);
+            white-space: nowrap;
+            flex-shrink: 0;
         }
 
-        .header-actions { display: flex; align-items: center; gap: 10px; }
+        .header-actions { display: flex; align-items: center; gap: 6px; flex: 1; justify-content: flex-end; }
 
-        .theme-toggle {
-            background: var(--input-bg);
-            border: 1px solid var(--input-border);
-            font-size: 1rem;
-            cursor: pointer;
-            padding: 6px 10px;
-            border-radius: 10px;
-            line-height: 1;
-        }
-
-        /* Search */
-        .search-bar { display: flex; gap: 8px; margin-bottom: 10px; }
-        .search-bar input {
+        /* Inline search (compact, right side of header) */
+        .search-inline { display: flex; gap: 0; flex: 1; max-width: 200px; }
+        .search-inline input {
             flex: 1;
-            padding: 12px 14px;
-            font-size: 0.95rem;
+            padding: 8px 10px;
+            font-size: 0.88rem;
             font-weight: 600;
-            letter-spacing: 0.5px;
             background: var(--input-bg);
             border: 1px solid var(--input-border);
+            border-right: none;
             color: var(--text-main);
-            border-radius: 12px;
+            border-radius: 10px 0 0 10px;
             text-transform: uppercase;
+            min-width: 0;
         }
-        .search-bar input::placeholder { font-weight: 400; letter-spacing: 0; text-transform: none; color: var(--text-sub); }
-        .search-bar input:focus { border-color: var(--accent); background: var(--hover-bg); }
-        .search-bar button {
-            padding: 0 18px;
-            font-size: 0.9rem;
+        .search-inline input::placeholder { font-weight: 400; text-transform: none; color: var(--text-sub); font-size: 0.8rem; }
+        .search-inline input:focus { border-color: var(--accent); background: var(--hover-bg); }
+        .search-inline button {
+            padding: 0 12px;
+            font-size: 1.1rem;
             font-weight: 700;
             background: var(--accent);
             color: white;
             border: none;
-            border-radius: 12px;
+            border-radius: 0 10px 10px 0;
             cursor: pointer;
-            letter-spacing: 0.3px;
         }
 
-        /* Sync / PIN */
-        .sync-row { display: flex; gap: 8px; margin-bottom: 6px; align-items: center; }
+        /* Icon pill buttons */
+        .icon-pill {
+            background: var(--input-bg);
+            border: 1px solid var(--input-border);
+            border-radius: 10px;
+            font-size: 1rem;
+            cursor: pointer;
+            padding: 6px 9px;
+            line-height: 1;
+            flex-shrink: 0;
+        }
+
+        /* Sync drawer */
+        .sync-drawer { padding-bottom: 8px; }
+        .sync-row { display: flex; gap: 6px; align-items: center; }
         .sync-row input {
             flex: 1;
-            padding: 10px 14px;
-            font-size: 0.88rem;
+            padding: 8px 12px;
+            font-size: 0.85rem;
             background: var(--input-bg);
             border: 1px solid var(--input-border);
             color: var(--text-main);
             border-radius: 10px;
             letter-spacing: 3px;
         }
-        .sync-row input::placeholder { letter-spacing: 0; font-size: 0.82rem; color: var(--text-sub); }
+        .sync-row input::placeholder { letter-spacing: 0; font-size: 0.78rem; color: var(--text-sub); }
         .sync-row button {
-            padding: 10px 14px;
-            font-size: 0.82rem;
+            padding: 8px 12px;
+            font-size: 0.78rem;
             font-weight: 700;
             background: var(--input-bg);
             color: var(--text-mid);
@@ -158,105 +164,84 @@
             cursor: pointer;
         }
         .sync-row button.primary { background: var(--accent); color: white; border-color: transparent; }
-        .sync-status { font-size: 0.72rem; color: var(--text-sub); min-height: 14px; padding-bottom: 2px; }
+        .sync-status { font-size: 0.7rem; color: var(--text-sub); min-height: 12px; margin-top: 3px; }
         .sync-status.error { color: var(--sell-color); }
         .sync-status.ok { color: var(--buy-color); }
 
         /* Tabs */
-        .tab-row { display: flex; gap: 0; margin-top: 4px; }
+        .tab-row { display: flex; gap: 0; margin-top: 2px; }
         .tab-btn {
             flex: 1;
-            padding: 12px 0 10px;
+            padding: 10px 0 8px;
             background: none;
             border: none;
             border-bottom: 2px solid transparent;
             color: var(--text-sub);
-            font-size: 0.85rem;
+            font-size: 0.82rem;
             font-weight: 600;
             cursor: pointer;
-            letter-spacing: 0.2px;
             transition: color 0.2s;
         }
         .tab-btn.active { color: var(--accent); border-bottom-color: var(--accent); }
 
         /* ---- MAIN ---- */
-        main { flex: 1; overflow-y: auto; padding: 14px; }
+        main { flex: 1; overflow-y: auto; padding: 10px 12px; }
 
         /* ---- CARD ---- */
         .stock-card {
             background: var(--card-bg);
             border: 1px solid var(--card-border);
-            border-radius: 18px;
-            margin-bottom: 12px;
+            border-radius: 16px;
+            margin-bottom: 10px;
             overflow: hidden;
             position: relative;
         }
 
-        /* Signature: left accent stripe by signal */
         .stock-card::before {
             content: '';
             position: absolute;
             left: 0; top: 0; bottom: 0;
             width: 3px;
-            border-radius: 18px 0 0 18px;
+            border-radius: 16px 0 0 16px;
         }
         .stock-card.sig-buy::before { background: var(--buy-color); }
         .stock-card.sig-sell::before { background: var(--sell-color); }
         .stock-card.sig-hold::before { background: var(--hold-color); }
 
-        .card-inner { padding: 14px 14px 0 18px; }
+        .card-inner { padding: 10px 10px 0 14px; }
 
-        /* Card top row */
         .card-top {
             display: flex;
             justify-content: space-between;
-            align-items: flex-start;
-            margin-bottom: 2px;
+            align-items: center;
         }
 
-        .card-left { display: flex; flex-direction: column; gap: 2px; }
-        .card-right { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
+        .card-left { display: flex; align-items: center; gap: 10px; }
+        .card-right { display: flex; align-items: center; gap: 8px; }
 
         .ticker {
-            font-size: 1.25rem;
+            font-size: 1.1rem;
             font-weight: 800;
             margin: 0;
-            letter-spacing: -0.3px;
+            letter-spacing: -0.2px;
             line-height: 1;
         }
-        .company-meta { font-size: 0.72rem; color: var(--text-sub); }
+        .company-meta { font-size: 0.68rem; color: var(--text-sub); }
 
         .price {
-            font-size: 1.35rem;
+            font-size: 1.15rem;
             font-weight: 800;
             margin: 0;
-            letter-spacing: -0.5px;
+            letter-spacing: -0.4px;
             line-height: 1;
         }
-        .price-change {
-            font-size: 0.72rem;
-            font-weight: 600;
-            color: var(--text-sub);
-        }
-
-        /* Stats row */
-        .stats-row {
-            display: flex;
-            gap: 14px;
-            margin: 8px 0 0;
-            padding: 8px 0;
-            border-top: 1px solid var(--divider);
-        }
-        .stat-item { display: flex; flex-direction: column; gap: 1px; }
-        .stat-label { font-size: 0.62rem; color: var(--text-sub); text-transform: uppercase; letter-spacing: 0.5px; font-weight: 600; }
-        .stat-value { font-size: 0.8rem; font-weight: 700; color: var(--text-main); }
 
         /* Badge */
         .badge {
-            padding: 3px 9px;
+            padding: 2px 7px;
             border-radius: 20px;
             font-weight: 700;
-            font-size: 0.68rem;
+            font-size: 0.62rem;
             text-transform: uppercase;
             letter-spacing: 0.5px;
         }
@@ -264,11 +249,43 @@
         .badge.sell { background: var(--sell-dim); color: var(--sell-color); }
         .badge.hold { background: var(--hold-dim); color: var(--hold-color); }
 
-        /* Action row */
+        /* Signal panel — compact, collapsible reasons */
+        .signal-panel {
+            background: var(--input-bg);
+            border-radius: 10px;
+            padding: 8px 10px;
+            margin: 8px 10px 0 14px;
+            cursor: pointer;
+        }
+        .signal-header { display: flex; align-items: center; gap: 8px; }
+        .confidence-bar-wrap { flex: 1; height: 3px; background: var(--divider); border-radius: 4px; overflow: hidden; }
+        .confidence-bar { display: block; height: 100%; border-radius: 4px; }
+        .confidence-label { font-size: 0.65rem; color: var(--text-sub); white-space: nowrap; font-weight: 600; }
+        .signal-reasons {
+            margin: 6px 0 0;
+            padding-left: 14px;
+            font-size: 0.73rem;
+            color: var(--text-sub);
+            line-height: 1.6;
+            display: none; /* collapsed by default */
+        }
+        .signal-panel.expanded .signal-reasons { display: block; }
+        .signal-expand-hint { font-size: 0.62rem; color: var(--text-sub); margin-left: auto; flex-shrink: 0; }
+        .signal-levels {
+            display: flex; gap: 10px; flex-wrap: wrap;
+            margin-top: 6px; padding-top: 6px;
+            border-top: 1px solid var(--divider);
+            font-size: 0.7rem; color: var(--text-sub);
+            display: none;
+        }
+        .signal-panel.expanded .signal-levels { display: flex; }
+        .signal-levels strong { color: var(--text-main); font-weight: 700; }
+
+        /* Action bar — icon only, compact */
         .actions {
             display: flex;
             border-top: 1px solid var(--divider);
-            margin: 10px 0 0;
+            margin: 8px 0 0;
         }
         .icon-btn {
             flex: 1;
@@ -276,18 +293,15 @@
             border: none;
             border-right: 1px solid var(--divider);
             color: var(--text-sub);
-            font-size: 0.75rem;
-            font-weight: 600;
+            font-size: 0.9rem;
             cursor: pointer;
-            padding: 10px 4px;
+            padding: 8px 4px;
             display: flex;
-            flex-direction: column;
             align-items: center;
-            gap: 3px;
+            justify-content: center;
             transition: background 0.15s, color 0.15s;
         }
         .icon-btn:last-child { border-right: none; }
-        .icon-btn .icon-glyph { font-size: 1rem; line-height: 1; }
         .icon-btn.active { color: var(--accent); background: var(--accent-dim); }
         .icon-btn:active { background: var(--hover-bg); }
 
@@ -489,23 +503,33 @@
 <body>
 
     <header>
+        <!-- Row 1: Title + search + controls -->
         <div class="header-top">
             <h1>Stockz Tracker</h1>
-            <button class="theme-toggle" onclick="toggleTheme()" id="themeIcon">🌓</button>
+            <div class="header-actions">
+                <div class="search-inline">
+                    <input type="text" id="tickerInput" placeholder="Ticker…" autocomplete="off" autocorrect="off" autocapitalize="characters" spellcheck="false">
+                    <button onclick="addStock()">+</button>
+                </div>
+                <button class="icon-pill" onclick="toggleSyncDrawer()" id="syncIcon" title="Cloud Sync">☁</button>
+                <button class="icon-pill" onclick="toggleTheme()" id="themeIcon">🌙</button>
+            </div>
         </div>
-        <div class="search-bar">
-            <input type="text" id="tickerInput" placeholder="Search Ticker (e.g. AAPL)">
-            <button onclick="addStock()">Add</button>
+
+        <!-- Sync drawer: hidden by default, slides in when ☁ tapped -->
+        <div class="sync-drawer" id="syncDrawer" style="display:none;">
+            <div class="sync-row">
+                <input type="text" id="pinInput" placeholder="PIN (4–12 digits)" inputmode="numeric" maxlength="12">
+                <button onclick="loadFromPin()">Load</button>
+                <button class="primary" onclick="saveToPin()">Save</button>
+            </div>
+            <div class="sync-status" id="syncStatus"></div>
         </div>
-        <div class="sync-row">
-            <input type="text" id="pinInput" placeholder="PIN (4-12 digits) for cloud sync" inputmode="numeric" maxlength="12">
-            <button onclick="loadFromPin()">Load</button>
-            <button class="primary" onclick="saveToPin()">Save</button>
-        </div>
-        <div class="sync-status" id="syncStatus"></div>
+
+        <!-- Tabs -->
         <div class="tab-row">
             <button class="tab-btn active" id="tab-portfolio" onclick="switchTab('portfolio')">Portfolio</button>
-            <button class="tab-btn" id="tab-guide" onclick="switchTab('guide')">Indicator Guide</button>
+            <button class="tab-btn" id="tab-guide" onclick="switchTab('guide')">Guide</button>
         </div>
     </header>
 
@@ -534,7 +558,21 @@
             const newMode = isLight ? 'dark' : 'light';
             localStorage.setItem('theme', newMode);
             applyTheme(newMode);
-            renderUI(); // Re-draw charts with correct colors
+            renderUI();
+        }
+
+        function toggleSyncDrawer() {
+            const drawer = document.getElementById('syncDrawer');
+            const icon = document.getElementById('syncIcon');
+            const isOpen = drawer.style.display !== 'none';
+            drawer.style.display = isOpen ? 'none' : 'block';
+            icon.style.background = isOpen ? '' : 'var(--accent)';
+            icon.style.color = isOpen ? '' : 'white';
+            icon.style.borderColor = isOpen ? '' : 'transparent';
+            if (!isOpen) {
+                // Pre-fill PIN if we have one saved
+                document.getElementById('pinInput').value = appState.pin;
+            }
         }
 
         // --- Tab Switching ---
@@ -939,9 +977,10 @@ Signal line = EMA(9) of MACD line</span>
             return `
                 <div class="signal-header">
                     <span class="badge ${sigClass}">${comp.signal}</span>
+                    <span class="signal-expand-hint">Tap for details ›</span>
                 </div>
                 <ul class="signal-reasons">
-                    ${comp.reasons.map(r => `<li>${r}</li>`).join('')}
+                    ${(comp.reasons || []).map(r => `<li>${r}</li>`).join('')}
                 </ul>`;
         }
 
@@ -1108,7 +1147,7 @@ Signal line = EMA(9) of MACD line</span>
                         <div class="card-top">
                             <div class="card-left">
                                 <h2 class="ticker">${ticker}</h2>
-                                <span class="company-meta">RSI ${rsi} &nbsp;·&nbsp; SMA $${sma}</span>
+                                <span class="company-meta">RSI ${rsi} · SMA $${sma}</span>
                             </div>
                             <div class="card-right">
                                 <h2 class="price" style="color:${isBullish ? 'var(--buy-color)' : 'var(--sell-color)'}">$${currentPrice.toFixed(2)}</h2>
@@ -1117,25 +1156,27 @@ Signal line = EMA(9) of MACD line</span>
                         </div>
                     </div>
 
-                    <!-- Signal Detail -->
-                    ${signalHtml}
+                    <!-- Signal (tap to expand reasons) -->
+                    <div class="signal-panel" id="signal-panel-${ticker}" onclick="this.classList.toggle('expanded')">
+                        ${buildSignalInnerHTML(comp)}
+                    </div>
 
                     <!-- Panel: CHART -->
                     <div class="panel chart-container ${ui.charts[ticker] ? 'active' : ''}">
                         <div class="indicator-toggles">
-                            <button class="ind-btn ${inds.volume?'active':''}" onclick="toggleUI('${ticker}', 'ind', 'volume')">Volume</button>
-                            <button class="ind-btn ${inds.sma?'active':''}" onclick="toggleUI('${ticker}', 'ind', 'sma')">SMA 50</button>
-                            <button class="ind-btn ${inds.sma20?'active':''}" onclick="toggleUI('${ticker}', 'ind', 'sma20')">SMA 20</button>
-                            <button class="ind-btn ${inds.sma200?'active':''}" onclick="toggleUI('${ticker}', 'ind', 'sma200')">SMA 200</button>
-                            <button class="ind-btn ${inds.ema20?'active':''}" onclick="toggleUI('${ticker}', 'ind', 'ema20')">EMA 20</button>
+                            <button class="ind-btn ${inds.volume?'active':''}" onclick="toggleUI('${ticker}', 'ind', 'volume')">Vol</button>
+                            <button class="ind-btn ${inds.sma?'active':''}" onclick="toggleUI('${ticker}', 'ind', 'sma')">SMA50</button>
+                            <button class="ind-btn ${inds.sma20?'active':''}" onclick="toggleUI('${ticker}', 'ind', 'sma20')">SMA20</button>
+                            <button class="ind-btn ${inds.sma200?'active':''}" onclick="toggleUI('${ticker}', 'ind', 'sma200')">SMA200</button>
+                            <button class="ind-btn ${inds.ema20?'active':''}" onclick="toggleUI('${ticker}', 'ind', 'ema20')">EMA20</button>
                             <button class="ind-btn ${inds.bb?'active':''}" onclick="toggleUI('${ticker}', 'ind', 'bb')">BB</button>
                             <button class="ind-btn ${inds.pivot?'active':''}" onclick="toggleUI('${ticker}', 'ind', 'pivot')">Pivots</button>
                             <button class="ind-btn ${inds.swing?'active':''}" onclick="toggleUI('${ticker}', 'ind', 'swing')">Swings</button>
                             <button class="ind-btn ${inds.rsi?'active':''}" onclick="toggleUI('${ticker}', 'ind', 'rsi')">RSI</button>
                             <button class="ind-btn ${inds.macd?'active':''}" onclick="toggleUI('${ticker}', 'ind', 'macd')">MACD</button>
                         </div>
-                        <div class="chart-legend-values" id="legend-${ticker}"></div>
                         <div class="crosshair-tooltip" id="xhair-${ticker}" style="display:none;"></div>
+                        <div class="chart-legend-values" id="legend-${ticker}"></div>
                         <div class="canvas-wrapper" style="position:relative;">
                             <canvas id="canvas-candle-${ticker}" style="position:absolute;top:0;left:0;width:100%;height:100%;"></canvas>
                             <canvas id="canvas-${ticker}" style="position:absolute;top:0;left:0;width:100%;height:100%;"></canvas>
@@ -1148,8 +1189,8 @@ Signal line = EMA(9) of MACD line</span>
 
                     <!-- Panel: ALERTS -->
                     <div class="panel ${ui.alerts[ticker] ? 'active' : ''}">
-                        <div style="margin-bottom:10px;">${alertsHtml}</div>
-                        <div style="font-size:0.78rem; color:var(--text-sub); margin-bottom:6px; font-weight:600; text-transform:uppercase; letter-spacing:0.4px;">New Alert</div>
+                        <div style="margin-bottom:8px;">${alertsHtml}</div>
+                        <div style="font-size:0.72rem;color:var(--text-sub);margin-bottom:5px;font-weight:600;text-transform:uppercase;letter-spacing:0.4px;">New Alert</div>
                         <div class="alert-form">
                             <select id="alt-ind-${ticker}"><option value="Price">Price</option><option value="RSI">RSI</option><option value="SMA">SMA 50</option></select>
                             <select id="alt-cond-${ticker}"><option value=">">Above</option><option value="<">Below</option></select>
@@ -1158,19 +1199,12 @@ Signal line = EMA(9) of MACD line</span>
                         </div>
                     </div>
 
+                    <!-- Icon-only action bar -->
                     <div class="actions">
-                        <button class="icon-btn ${ui.charts[ticker]?'active':''}" onclick="toggleUI('${ticker}', 'panel', 'charts')">
-                            <span class="icon-glyph">📈</span><span>Chart</span>
-                        </button>
-                        <button class="icon-btn ${ui.news[ticker]?'active':''}" onclick="toggleUI('${ticker}', 'panel', 'news')">
-                            <span class="icon-glyph">📰</span><span>News</span>
-                        </button>
-                        <button class="icon-btn ${ui.alerts[ticker]?'active':''}" onclick="toggleUI('${ticker}', 'panel', 'alerts')">
-                            <span class="icon-glyph">🔔</span><span>Alerts</span>
-                        </button>
-                        <button class="icon-btn" onclick="deleteStock('${ticker}')">
-                            <span class="icon-glyph">✕</span><span>Remove</span>
-                        </button>
+                        <button class="icon-btn ${ui.charts[ticker]?'active':''}" onclick="toggleUI('${ticker}', 'panel', 'charts')" title="Chart">📈</button>
+                        <button class="icon-btn ${ui.news[ticker]?'active':''}" onclick="toggleUI('${ticker}', 'panel', 'news')" title="News">📰</button>
+                        <button class="icon-btn ${ui.alerts[ticker]?'active':''}" onclick="toggleUI('${ticker}', 'panel', 'alerts')" title="Alerts">🔔</button>
+                        <button class="icon-btn" onclick="deleteStock('${ticker}')" title="Remove">✕</button>
                     </div>
                 </div>
             `;
@@ -1650,8 +1684,6 @@ Signal line = EMA(9) of MACD line</span>
         });
 
         // Initialize App
-        document.getElementById('pinInput').value = appState.pin;
-
         updateData();
         setInterval(updateData, CONFIG.REFRESH_MS);
     </script>
