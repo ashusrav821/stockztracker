@@ -1055,7 +1055,10 @@ Signal line = EMA(9) of MACD line</span>
                     html += `
                         <div class="info-card error-card">
                             <div><strong>${ticker}</strong>: Display error (${e.message || 'unknown'})</div>
-                            <button class="retry-btn" onclick="retryStock('${ticker}')">Retry</button>
+                            <div style="display:flex;gap:8px;margin-top:8px;">
+                                <button class="retry-btn" onclick="retryStock('${ticker}')">Retry</button>
+                                <button class="retry-btn" style="color:var(--sell-color)" onclick="deleteStock('${ticker}')">Remove</button>
+                            </div>
                         </div>`;
                 }
             }
@@ -1084,7 +1087,10 @@ Signal line = EMA(9) of MACD line</span>
                     return `
                         <div class="info-card error-card">
                             <div><strong>${ticker}</strong>: ${appState.errors[ticker]}</div>
-                            <button class="retry-btn" onclick="retryStock('${ticker}')">Retry</button>
+                            <div style="display:flex;gap:8px;margin-top:8px;">
+                                <button class="retry-btn" onclick="retryStock('${ticker}')">Retry</button>
+                                <button class="retry-btn" style="color:var(--sell-color)" onclick="deleteStock('${ticker}')">Remove</button>
+                            </div>
                         </div>`;
                 }
                 return `<div class="info-card">${ticker}: Loading...</div>`;
@@ -1095,7 +1101,10 @@ Signal line = EMA(9) of MACD line</span>
                 return `
                     <div class="info-card error-card">
                         <div><strong>${ticker}</strong>: No usable price data</div>
-                        <button class="retry-btn" onclick="retryStock('${ticker}')">Retry</button>
+                        <div style="display:flex;gap:8px;margin-top:8px;">
+                            <button class="retry-btn" onclick="retryStock('${ticker}')">Retry</button>
+                            <button class="retry-btn" style="color:var(--sell-color)" onclick="deleteStock('${ticker}')">Remove</button>
+                        </div>
                     </div>`;
             }
 
@@ -1689,13 +1698,37 @@ Signal line = EMA(9) of MACD line</span>
 
         function addStock() {
             const val = document.getElementById('tickerInput').value.toUpperCase().trim();
-            if(val && !appState.watchlist.includes(val)) {
-                appState.watchlist.unshift(val);
-                persistWatchlist();
-                document.getElementById('tickerInput').value = '';
-                document.getElementById('watchlist').innerHTML = '<div class="info-card">Fetching...</div>';
-                updateData();
+            const input = document.getElementById('tickerInput');
+
+            if (!val) return;
+
+            // Validate ticker format: 1–6 uppercase letters/numbers, optionally with . or -
+            // Rejects full names like "Netflix", "Apple Inc", etc.
+            if (!/^[A-Z0-9]{1,6}([.\-][A-Z0-9]{1,4})?$/.test(val)) {
+                input.style.borderColor = 'var(--sell-color)';
+                input.placeholder = 'Use symbol e.g. NFLX, AAPL';
+                setTimeout(() => {
+                    input.style.borderColor = '';
+                    input.placeholder = 'Ticker…';
+                }, 2500);
+                return;
             }
+
+            if (appState.watchlist.includes(val)) {
+                input.style.borderColor = 'var(--hold-color)';
+                input.placeholder = `${val} already added`;
+                setTimeout(() => {
+                    input.style.borderColor = '';
+                    input.placeholder = 'Ticker…';
+                }, 2000);
+                return;
+            }
+
+            appState.watchlist.unshift(val);
+            persistWatchlist();
+            input.value = '';
+            document.getElementById('watchlist').innerHTML = '<div class="info-card">Fetching...</div>';
+            updateData();
         }
 
         function deleteStock(ticker) {
@@ -1744,6 +1777,9 @@ Signal line = EMA(9) of MACD line</span>
         });
 
         // Initialize App
+        document.getElementById('tickerInput').addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') addStock();
+        });
         updateData();
         setInterval(updateData, CONFIG.REFRESH_MS);
     </script>
