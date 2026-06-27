@@ -1175,13 +1175,13 @@ Signal line = EMA(9) of MACD line</span>
                             <button class="ind-btn ${inds.rsi?'active':''}" onclick="toggleUI('${ticker}', 'ind', 'rsi')">RSI</button>
                             <button class="ind-btn ${inds.macd?'active':''}" onclick="toggleUI('${ticker}', 'ind', 'macd')">MACD</button>
                         </div>
-                        <div class="crosshair-tooltip" id="xhair-${ticker}" style="display:none;"></div>
                         <div class="chart-legend-values" id="legend-${ticker}"></div>
                         <div class="canvas-wrapper" style="position:relative;">
                             <canvas id="canvas-candle-${ticker}" style="position:absolute;top:0;left:0;width:100%;height:100%;"></canvas>
                             <canvas id="canvas-${ticker}" style="position:absolute;top:0;left:0;width:100%;height:100%;"></canvas>
                             <canvas id="canvas-cross-${ticker}" style="position:absolute;top:0;left:0;width:100%;height:100%;cursor:crosshair;"></canvas>
                         </div>
+                        <div class="crosshair-tooltip" id="xhair-${ticker}" style="display:none;"></div>
                     </div>
 
                     <!-- Panel: NEWS -->
@@ -1212,6 +1212,25 @@ Signal line = EMA(9) of MACD line</span>
 
         // --- Candlestick Chart Plugin (native, no external dependency) ---
         // Registers a custom 'candlestick' chart type with Chart.js once.
+        // roundRect polyfill for older browsers/WebViews that don't support it natively
+        if (!CanvasRenderingContext2D.prototype.roundRect) {
+            CanvasRenderingContext2D.prototype.roundRect = function(x, y, w, h, r) {
+                r = Math.min(r, w/2, h/2);
+                this.beginPath();
+                this.moveTo(x + r, y);
+                this.lineTo(x + w - r, y);
+                this.arcTo(x + w, y, x + w, y + r, r);
+                this.lineTo(x + w, y + h - r);
+                this.arcTo(x + w, y + h, x + w - r, y + h, r);
+                this.lineTo(x + r, y + h);
+                this.arcTo(x, y + h, x, y + h - r, r);
+                this.lineTo(x, y + r);
+                this.arcTo(x, y, x + r, y, r);
+                this.closePath();
+                return this;
+            };
+        }
+
         // --- Price Action Indicators ---
         function getPivotPoints(ohlc) {
             if (!ohlc || ohlc.length < 2) return null;
@@ -1523,14 +1542,28 @@ Signal line = EMA(9) of MACD line</span>
                 return Math.max(0, Math.min((ohlc.length || prices.length) - 1, i));
             };
 
+            // Remove old listeners by cloning the element (prevents duplicate handlers on re-render)
+            const newCross = crossCanvas.cloneNode(true);
+            crossCanvas.parentNode.replaceChild(newCross, crossCanvas);
+
+            // Recompute OHLC price range for horizontal price label on the right axis
+            const validOhlcForRange = ohlc.filter(c => c && c.h !== null);
+            const pMax2 = validOhlcForRange.length ? Math.max(...validOhlcForRange.map(c => c.h)) * 1.06 : null;
+            const pMin2 = validOhlcForRange.length ? Math.min(...validOhlcForRange.map(c => c.l)) * 0.94 : null;
+            const pRange2 = (pMax2 !== null && pMin2 !== null) ? pMax2 - pMin2 : null;
+            const toPriceY = (price) => pRange2 ? PAD_L + CHART_H * (1 - (price - pMin2) / pRange2) : null;
+
             const drawCrosshair = (clientX) => {
-                const ctx2 = crossCanvas.getContext('2d');
+                // IMPORTANT: use newCross (the DOM-attached clone), not crossCanvas (detached original)
+                const ctx2 = newCross.getContext('2d');
                 ctx2.clearRect(0, 0, layoutW, layoutH);
                 const idx = xToIndex(clientX);
                 const x = PAD_L + (idx + 0.5) * slotW2;
+                const c = hasOhlc ? ohlc[idx] : null;
+                const closePrice = c ? c.c : prices[idx];
 
-                // Vertical line
-                ctx2.strokeStyle = isLight ? 'rgba(0,0,0,0.25)' : 'rgba(255,255,255,0.25)';
+                // Vertical crosshair line
+                ctx2.strokeStyle = isLight ? 'rgba(0,0,0,0.3)' : 'rgba(255,255,255,0.3)';
                 ctx2.lineWidth = 1;
                 ctx2.setLineDash([4, 3]);
                 ctx2.beginPath();
@@ -1539,25 +1572,55 @@ Signal line = EMA(9) of MACD line</span>
                 ctx2.stroke();
                 ctx2.setLineDash([]);
 
-                // Date label at bottom of crosshair
+                // Date pill at bottom of the crosshair line
                 const dateLabel = dates[idx] || '';
                 ctx2.font = 'bold 10px -apple-system,sans-serif';
-                ctx2.textAlign = 'center';
-                const dateLabelW = ctx2.measureText(dateLabel).width + 10;
+                const dateLabelW = ctx2.measureText(dateLabel).width + 12;
                 const dateLabelX = Math.max(dateLabelW/2 + PAD_L, Math.min(layoutW - PAD_R - dateLabelW/2, x));
-                ctx2.fillStyle = isLight ? '#333' : '#ccc';
-                ctx2.fillRect(dateLabelX - dateLabelW/2, CHART_H + 1, dateLabelW, DATE_H - 2);
+                const datePillColor = isLight ? '#444' : '#bbb';
+                ctx2.fillStyle = datePillColor;
+                ctx2.beginPath();
+                ctx2.roundRect(dateLabelX - dateLabelW/2, CHART_H + 2, dateLabelW, DATE_H - 4, 4);
+                ctx2.fill();
                 ctx2.fillStyle = isLight ? '#fff' : '#111';
-                ctx2.fillText(dateLabel, dateLabelX, CHART_H + DATE_H - 4);
+                ctx2.textAlign = 'center';
+                ctx2.fillText(dateLabel, dateLabelX, CHART_H + DATE_H - 5);
 
-                // Build tooltip values
+                // Price label on right axis at close price level
+                if (closePrice !== null && toPriceY) {
+                    const priceY = toPriceY(closePrice);
+                    if (priceY !== null && priceY > 0 && priceY < CHART_H) {
+                        // Horizontal dotted line to right axis
+                        ctx2.strokeStyle = isLight ? 'rgba(0,0,0,0.2)' : 'rgba(255,255,255,0.2)';
+                        ctx2.lineWidth = 1;
+                        ctx2.setLineDash([3, 3]);
+                        ctx2.beginPath();
+                        ctx2.moveTo(x, priceY);
+                        ctx2.lineTo(layoutW - PAD_R + 2, priceY);
+                        ctx2.stroke();
+                        ctx2.setLineDash([]);
+
+                        // Price pill on right axis
+                        const priceLabel = '$' + closePrice.toFixed(2);
+                        ctx2.font = 'bold 10px -apple-system,sans-serif';
+                        const priceLabelW = ctx2.measureText(priceLabel).width + 8;
+                        const priceColor = c ? (c.c >= c.o ? '#00d395' : '#ff5c5c') : '#00d395';
+                        ctx2.fillStyle = priceColor;
+                        ctx2.beginPath();
+                        ctx2.roundRect(layoutW - PAD_R + 3, priceY - 8, priceLabelW, 16, 3);
+                        ctx2.fill();
+                        ctx2.fillStyle = '#fff';
+                        ctx2.textAlign = 'left';
+                        ctx2.fillText(priceLabel, layoutW - PAD_R + 7, priceY + 4);
+                    }
+                }
+
+                // Update the tooltip div below the chart
                 const fmt2 = (v, d=2) => (v===null||v===undefined||isNaN(v)) ? '—' : Number(v).toFixed(d);
-                const c = hasOhlc ? ohlc[idx] : null;
                 const tooltipEl = document.getElementById('xhair-' + ticker);
                 if (!tooltipEl) return;
 
                 const parts = [];
-                parts.push({ name: 'Date', color: isLight ? '#333' : '#ccc', val: dateLabel });
                 if (c && c.o !== null) {
                     parts.push({ name: 'O', color: '#888', val: fmt2(c.o) });
                     parts.push({ name: 'H', color: '#00d395', val: fmt2(c.h) });
@@ -1573,8 +1636,8 @@ Signal line = EMA(9) of MACD line</span>
                 if (inds.sma200 && computed.sma200) parts.push({ name:'SMA200', color:'#ff9f7f', val:fmt2(getAt(computed.sma200.slice(-sl), idx)) });
                 if (inds.ema20 && computed.ema20) parts.push({ name:'EMA20', color:'#a78bfa', val:fmt2(getAt(computed.ema20.slice(-sl), idx)) });
                 if (inds.bb && computed.bb) {
-                    parts.push({ name:'BB↑', color:'rgba(180,180,255,0.8)', val:fmt2(getAt(computed.bb.upper.slice(-sl), idx)) });
-                    parts.push({ name:'BB↓', color:'rgba(180,180,255,0.8)', val:fmt2(getAt(computed.bb.lower.slice(-sl), idx)) });
+                    parts.push({ name:'BB↑', color:'rgba(140,140,220,1)', val:fmt2(getAt(computed.bb.upper.slice(-sl), idx)) });
+                    parts.push({ name:'BB↓', color:'rgba(140,140,220,1)', val:fmt2(getAt(computed.bb.lower.slice(-sl), idx)) });
                 }
                 if (inds.rsi && computed.rsi) parts.push({ name:'RSI', color:'#b58900', val:fmt2(getAt(computed.rsi.slice(-sl), idx), 1) });
                 if (inds.macd && computed.macd) {
@@ -1583,30 +1646,27 @@ Signal line = EMA(9) of MACD line</span>
                 }
 
                 tooltipEl.style.display = 'flex';
-                tooltipEl.innerHTML = parts.map(p =>
-                    `<span class="xhair-item"><span class="xhair-dot" style="background:${p.color}"></span><span class="xhair-name">${p.name}</span><span class="xhair-val">${p.val}</span></span>`
-                ).join('');
+                tooltipEl.innerHTML = `<span style="font-size:0.7rem;color:var(--text-sub);font-weight:700;margin-right:4px;">${dateLabel}</span>` +
+                    parts.map(p =>
+                        `<span class="xhair-item"><span class="xhair-dot" style="background:${p.color}"></span><span class="xhair-name">${p.name}</span><span class="xhair-val">${p.val}</span></span>`
+                    ).join('');
             };
 
             const clearCrosshair = () => {
-                const ctx2 = crossCanvas.getContext('2d');
+                const ctx2 = newCross.getContext('2d');
                 ctx2.clearRect(0, 0, layoutW, layoutH);
                 const tooltipEl = document.getElementById('xhair-' + ticker);
                 if (tooltipEl) tooltipEl.style.display = 'none';
             };
 
-            // Remove old listeners by cloning the element
-            const newCross = crossCanvas.cloneNode(true);
-            crossCanvas.parentNode.replaceChild(newCross, crossCanvas);
-
             // Mouse events
             newCross.addEventListener('mousemove', (e) => drawCrosshair(e.clientX));
             newCross.addEventListener('mouseleave', clearCrosshair);
 
-            // Touch events (mobile scrubber)
+            // Touch events — scrub on touchmove, stay visible until next touch
             newCross.addEventListener('touchstart', (e) => { e.preventDefault(); drawCrosshair(e.touches[0].clientX); }, { passive: false });
             newCross.addEventListener('touchmove', (e) => { e.preventDefault(); drawCrosshair(e.touches[0].clientX); }, { passive: false });
-            newCross.addEventListener('touchend', () => setTimeout(clearCrosshair, 1500));
+            newCross.addEventListener('touchend', (e) => { e.preventDefault(); /* keep visible — user lifts finger to read */ });
         }
 
         // --- App Interactions ---
