@@ -184,6 +184,48 @@
         }
         .tab-btn.active { color: var(--accent); border-bottom-color: var(--accent); }
 
+        /* Filter bar */
+        .filter-bar {
+            display: flex;
+            align-items: center;
+            padding: 8px 12px 4px;
+            background: var(--bg-base);
+            position: sticky;
+            top: var(--header-height, 110px);
+            z-index: 90;
+        }
+        .filter-bar input {
+            flex: 1;
+            padding: 8px 12px;
+            font-size: 0.88rem;
+            background: var(--input-bg);
+            border: 1px solid var(--input-border);
+            border-right: none;
+            color: var(--text-main);
+            border-radius: 10px 0 0 10px;
+            outline: none;
+            text-transform: uppercase;
+        }
+        .filter-bar input::placeholder { text-transform: none; color: var(--text-sub); }
+        .filter-bar input:focus { border-color: var(--accent); }
+        .filter-clear {
+            padding: 8px 12px;
+            background: var(--input-bg);
+            border: 1px solid var(--input-border);
+            border-left: none;
+            border-radius: 0 10px 10px 0;
+            color: var(--text-sub);
+            font-size: 0.85rem;
+            cursor: pointer;
+        }
+        .filter-clear:hover { color: var(--sell-color); }
+        .filter-no-results {
+            text-align: center;
+            color: var(--text-sub);
+            font-size: 0.88rem;
+            padding: 24px;
+        }
+
         /* ---- MAIN ---- */
         main { flex: 1; overflow-y: auto; padding: 10px 12px; }
 
@@ -551,6 +593,11 @@
         </div>
     </header>
 
+    <div class="filter-bar" id="filterBar">
+        <input type="text" id="filterInput" placeholder="🔍  Filter stocks…" autocomplete="off" autocorrect="off" autocapitalize="characters" spellcheck="false" oninput="filterWatchlist(this.value)">
+        <button class="filter-clear" id="filterClear" onclick="clearFilter()" style="display:none;">✕</button>
+    </div>
+
     <main id="watchlist">
         <div class="info-card">Initializing Data...</div>
     </main>
@@ -599,10 +646,12 @@
             const guide = document.getElementById('guideView');
             const tabPortfolio = document.getElementById('tab-portfolio');
             const tabGuide = document.getElementById('tab-guide');
+            const filterBar = document.getElementById('filterBar');
 
             if (tab === 'guide') {
                 portfolio.style.display = 'none';
                 guide.style.display = 'block';
+                if (filterBar) filterBar.style.display = 'none';
                 tabPortfolio.classList.remove('active');
                 tabGuide.classList.add('active');
                 if (!guide.dataset.rendered) {
@@ -612,9 +661,48 @@
             } else {
                 portfolio.style.display = '';
                 guide.style.display = 'none';
+                if (filterBar) filterBar.style.display = 'flex';
                 tabGuide.classList.remove('active');
                 tabPortfolio.classList.add('active');
             }
+        }
+
+        // Filter rendered cards by ticker — pure DOM show/hide, no re-render.
+        function filterWatchlist(query) {
+            const q = (query || '').trim().toUpperCase();
+            const clearBtn = document.getElementById('filterClear');
+            if (clearBtn) clearBtn.style.display = q ? 'block' : 'none';
+
+            const container = document.getElementById('watchlist');
+            if (!container) return;
+
+            const cards = container.querySelectorAll('.stock-card[data-ticker]');
+            let visibleCount = 0;
+            cards.forEach(card => {
+                const show = !q || card.dataset.ticker.includes(q);
+                card.style.display = show ? '' : 'none';
+                if (show) visibleCount++;
+            });
+
+            // No-results message
+            let noResults = container.querySelector('.filter-no-results');
+            if (visibleCount === 0 && q) {
+                if (!noResults) {
+                    noResults = document.createElement('div');
+                    noResults.className = 'filter-no-results';
+                    container.appendChild(noResults);
+                }
+                noResults.textContent = `No stocks matching "${q}"`;
+                noResults.style.display = '';
+            } else if (noResults) {
+                noResults.style.display = 'none';
+            }
+        }
+
+        function clearFilter() {
+            const input = document.getElementById('filterInput');
+            if (input) { input.value = ''; input.focus(); }
+            filterWatchlist('');
         }
 
         // --- Indicator Guide Content ---
@@ -1141,6 +1229,9 @@ Signal line = EMA(9) of MACD line</span>
                     try { drawChart(ticker); } catch (e) { console.error(`drawChart failed for ${ticker}:`, e); }
                 }
             });
+            // Re-apply active filter after DOM rebuild
+            const filterInput = document.getElementById('filterInput');
+            if (filterInput && filterInput.value) filterWatchlist(filterInput.value);
         } // end _doRenderUI
 
         // Targeted update: toggle one indicator button + redraw only that ticker's chart.
@@ -1230,7 +1321,7 @@ Signal line = EMA(9) of MACD line</span>
                 </div>`;
 
             return `
-                <div class="stock-card sig-${sigClass}">
+                <div class="stock-card sig-${sigClass}" data-ticker="${ticker}">
                     <div class="card-inner">
                         <div class="card-top">
                             <div class="card-left">
