@@ -340,6 +340,24 @@
             background: var(--accent-dim);
         }
 
+        /* Visual separator in indicator row (before oscillators) */
+        .ind-sep { width: 1px; background: var(--divider); margin: 2px 4px; flex-shrink: 0; align-self: stretch; }
+
+        /* Zoom controls */
+        .zoom-row { display: flex; gap: 6px; margin-top: 6px; align-items: center; }
+        .zoom-btn {
+            background: var(--input-bg);
+            border: 1px solid var(--input-border);
+            color: var(--text-main);
+            border-radius: 8px;
+            font-size: 0.85rem;
+            font-weight: 700;
+            padding: 4px 12px;
+            cursor: pointer;
+            line-height: 1.4;
+        }
+        .zoom-btn:active { background: var(--hover-bg); }
+
         /* Crosshair tooltip */
         .crosshair-tooltip {
             font-size: 0.74rem;
@@ -1181,12 +1199,17 @@ Signal line = EMA(9) of MACD line</span>
                             <button class="ind-btn ${inds.bb?'active':''}" onclick="toggleUI('${ticker}', 'ind', 'bb')">BB</button>
                             <button class="ind-btn ${inds.pivot?'active':''}" onclick="toggleUI('${ticker}', 'ind', 'pivot')">Pivots</button>
                             <button class="ind-btn ${inds.swing?'active':''}" onclick="toggleUI('${ticker}', 'ind', 'swing')">Swings</button>
+                            <span class="ind-sep"></span>
                             <button class="ind-btn ${inds.rsi?'active':''}" onclick="toggleUI('${ticker}', 'ind', 'rsi')">RSI</button>
                             <button class="ind-btn ${inds.macd?'active':''}" onclick="toggleUI('${ticker}', 'ind', 'macd')">MACD</button>
                         </div>
+                        <div class="zoom-row">
+                            <button class="zoom-btn" onclick="zoomIn('${ticker}', appState.dataCache['${ticker}']?.prices?.length||252);drawChart('${ticker}')">＋</button>
+                            <button class="zoom-btn" onclick="zoomOut('${ticker}', appState.dataCache['${ticker}']?.prices?.length||252);drawChart('${ticker}')">－</button>
+                            <button class="zoom-btn" onclick="zoomReset('${ticker}');drawChart('${ticker}')">1Y</button>
+                        </div>
                         <div class="chart-legend-values" id="legend-${ticker}"></div>
                         <div class="canvas-wrapper" style="position:relative;">
-                            <canvas id="canvas-candle-${ticker}" style="position:absolute;top:0;left:0;width:100%;height:100%;"></canvas>
                             <canvas id="canvas-${ticker}" style="position:absolute;top:0;left:0;width:100%;height:100%;"></canvas>
                             <canvas id="canvas-cross-${ticker}" style="position:absolute;top:0;left:0;width:100%;height:100%;cursor:crosshair;"></canvas>
                         </div>
@@ -1221,22 +1244,16 @@ Signal line = EMA(9) of MACD line</span>
 
         // --- Candlestick Chart Plugin (native, no external dependency) ---
         // Registers a custom 'candlestick' chart type with Chart.js once.
-        // roundRect polyfill for older browsers/WebViews that don't support it natively
+        // roundRect polyfill for older browsers/WebViews
         if (!CanvasRenderingContext2D.prototype.roundRect) {
             CanvasRenderingContext2D.prototype.roundRect = function(x, y, w, h, r) {
                 r = Math.min(r, w/2, h/2);
                 this.beginPath();
-                this.moveTo(x + r, y);
-                this.lineTo(x + w - r, y);
-                this.arcTo(x + w, y, x + w, y + r, r);
-                this.lineTo(x + w, y + h - r);
-                this.arcTo(x + w, y + h, x + w - r, y + h, r);
-                this.lineTo(x + r, y + h);
-                this.arcTo(x, y + h, x, y + h - r, r);
-                this.lineTo(x, y + r);
-                this.arcTo(x, y, x + r, y, r);
-                this.closePath();
-                return this;
+                this.moveTo(x+r, y); this.lineTo(x+w-r, y); this.arcTo(x+w,y, x+w,y+r, r);
+                this.lineTo(x+w, y+h-r); this.arcTo(x+w,y+h, x+w-r,y+h, r);
+                this.lineTo(x+r, y+h); this.arcTo(x,y+h, x,y+h-r, r);
+                this.lineTo(x, y+r); this.arcTo(x,y, x+r,y, r);
+                this.closePath(); return this;
             };
         }
 
@@ -1246,168 +1263,59 @@ Signal line = EMA(9) of MACD line</span>
             const prev = ohlc[ohlc.length - 2];
             if (!prev || prev.h === null) return null;
             const pp = (prev.h + prev.l + prev.c) / 3;
-            return { pp, r1: 2*pp - prev.l, r2: pp + (prev.h - prev.l), s1: 2*pp - prev.h, s2: pp - (prev.h - prev.l) };
+            return { pp, r1:2*pp-prev.l, r2:pp+(prev.h-prev.l), s1:2*pp-prev.h, s2:pp-(prev.h-prev.l) };
         }
 
         function getSwingPoints(ohlc, lookback = 5) {
             const highs = [], lows = [];
-            if (!ohlc || ohlc.length < lookback * 2 + 1) return { highs, lows };
-            for (let i = lookback; i < ohlc.length - lookback; i++) {
+            if (!ohlc || ohlc.length < lookback*2+1) return { highs, lows };
+            for (let i = lookback; i < ohlc.length-lookback; i++) {
                 const c = ohlc[i];
                 if (!c || c.h === null) continue;
-                const win = ohlc.slice(i - lookback, i + lookback + 1);
+                const win = ohlc.slice(i-lookback, i+lookback+1);
                 if (win.some(w => !w || w.h === null)) continue;
-                if (c.h >= Math.max(...win.map(w => w.h))) highs.push({ x: i, y: c.h });
-                if (c.l <= Math.min(...win.map(w => w.l))) lows.push({ x: i, y: c.l });
+                if (c.h >= Math.max(...win.map(w => w.h))) highs.push({ x:i, y:c.h });
+                if (c.l <= Math.min(...win.map(w => w.l))) lows.push({ x:i, y:c.l });
             }
             return { highs, lows };
         }
 
-        // --- Chart Drawing Logic ---
-        // Candlesticks, volume, pivots, swing markers drawn directly on canvas-candle-{ticker}
-        // using raw Canvas 2D — no Chart.js dependency, guaranteed visible.
-        // Overlay lines (SMA/BB/RSI/MACD) drawn on canvas-{ticker} via Chart.js (transparent bg).
-
-        function drawCandleCanvas(ticker, ohlc, dates, inds, isLight) {
-            const canvas = document.getElementById('canvas-candle-' + ticker);
-            if (!canvas || !ohlc || !ohlc.length) return;
-            const wrapper = canvas.parentElement;
-            const W = wrapper.clientWidth || 360;
-            const H = wrapper.clientHeight || 280;
-            canvas.width = W;
-            canvas.height = H;
-            const ctx = canvas.getContext('2d');
-            ctx.clearRect(0, 0, W, H);
-
-            const VOLUME_H = inds.volume ? Math.floor(H * 0.18) : 0;
-            const DATE_H = 16;
-            const CHART_H = H - VOLUME_H - DATE_H;
-            const PAD_R = 52;
-            const PAD_L = 4;
-            const CHART_W = W - PAD_L - PAD_R;
-            const n = ohlc.length;
-            const slotW = CHART_W / n;
-            const bodyW = Math.max(1, Math.min(10, slotW * 0.55));
-            const toX = (i) => PAD_L + (i + 0.5) * slotW;
-
-            // Price range from OHLC
-            const valid = ohlc.filter(c => c && c.h !== null);
-            if (!valid.length) return;
-            let pMax = Math.max(...valid.map(c => c.h));
-            let pMin = Math.min(...valid.map(c => c.l));
-            const pad = (pMax - pMin) * 0.06 || 1;
-            pMax += pad; pMin -= pad;
-            const pRange = pMax - pMin;
-            const toY = (p) => PAD_L + CHART_H * (1 - (p - pMin) / pRange);
-
-            // Grid + price axis
-            ctx.font = '10px -apple-system,sans-serif';
-            ctx.textAlign = 'right';
-            const gridSteps = 4;
-            for (let i = 0; i <= gridSteps; i++) {
-                const p = pMin + (pRange * i / gridSteps);
-                const y = toY(p);
-                ctx.strokeStyle = isLight ? '#e5e5ea' : '#1e1e2a';
-                ctx.lineWidth = 0.5;
-                ctx.beginPath(); ctx.moveTo(PAD_L, y); ctx.lineTo(W - PAD_R + 2, y); ctx.stroke();
-                ctx.fillStyle = isLight ? '#8e8e93' : '#666680';
-                ctx.fillText('$' + p.toFixed(2), W - 2, y + 3);
-            }
-
-            // Pivot lines
-            if (inds.pivot) {
-                const pv = getPivotPoints(ohlc);
-                if (pv) {
-                    const pvLevels = [
-                        { v: pv.r2, label: 'R2', color: '#ff5c5c' },
-                        { v: pv.r1, label: 'R1', color: '#ff9f7f' },
-                        { v: pv.pp, label: 'PP', color: isLight ? '#6060c8' : '#a0a0ff' },
-                        { v: pv.s1, label: 'S1', color: '#5ac8fa' },
-                        { v: pv.s2, label: 'S2', color: '#00d395' },
-                    ];
-                    pvLevels.forEach(({ v, label, color }) => {
-                        if (v < pMin || v > pMax) return;
-                        const y = toY(v);
-                        ctx.save();
-                        ctx.strokeStyle = color;
-                        ctx.lineWidth = 1;
-                        ctx.setLineDash([4, 4]);
-                        ctx.beginPath(); ctx.moveTo(PAD_L, y); ctx.lineTo(W - PAD_R, y); ctx.stroke();
-                        ctx.setLineDash([]);
-                        ctx.fillStyle = color;
-                        ctx.font = 'bold 9px -apple-system,sans-serif';
-                        ctx.textAlign = 'left';
-                        ctx.fillText(label, PAD_L + 3, y - 2);
-                        ctx.restore();
-                    });
-                }
-            }
-
-            // Candles
-            ohlc.forEach((c, i) => {
-                if (!c || c.h === null) return;
-                const isBull = c.c >= c.o;
-                const color = isBull ? '#00d395' : '#ff5c5c';
-                const x = toX(i);
-                ctx.strokeStyle = color;
-                ctx.lineWidth = 1;
-                // Wick
-                ctx.beginPath();
-                ctx.moveTo(x, toY(c.h));
-                ctx.lineTo(x, toY(c.l));
-                ctx.stroke();
-                // Body
-                const bodyTop = Math.min(toY(c.o), toY(c.c));
-                const bodyH = Math.max(1, Math.abs(toY(c.c) - toY(c.o)));
-                ctx.fillStyle = isBull ? 'rgba(0,211,149,0.35)' : color;
-                ctx.fillRect(x - bodyW/2, bodyTop, bodyW, bodyH);
-                ctx.strokeRect(x - bodyW/2, bodyTop, bodyW, bodyH);
-            });
-
-            // Swing markers
-            if (inds.swing) {
-                const { highs, lows } = getSwingPoints(ohlc);
-                const tri = (x, y, up, color) => {
-                    ctx.save();
-                    ctx.fillStyle = color;
-                    ctx.beginPath();
-                    const s = 5, off = 6;
-                    if (up) { ctx.moveTo(x, y-off-s*1.5); ctx.lineTo(x-s, y-off); ctx.lineTo(x+s, y-off); }
-                    else    { ctx.moveTo(x, y+off+s*1.5); ctx.lineTo(x-s, y+off); ctx.lineTo(x+s, y+off); }
-                    ctx.closePath(); ctx.fill(); ctx.restore();
-                };
-                highs.forEach(p => { if (p.x < n) tri(toX(p.x), toY(p.y), false, '#ff5c5c'); });
-                lows.forEach(p => { if (p.x < n) tri(toX(p.x), toY(p.y), true, '#00d395'); });
-            }
-
-            // Volume bars
-            if (inds.volume && VOLUME_H > 0) {
-                const maxVol = Math.max(...ohlc.map(c => c?.v || 0)) || 1;
-                const volY = CHART_H + DATE_H/2;
-                ohlc.forEach((c, i) => {
-                    if (!c || !c.v) return;
-                    const bh = (c.v / maxVol) * (VOLUME_H - 4);
-                    const x = toX(i);
-                    ctx.fillStyle = c.c >= c.o ? 'rgba(0,211,149,0.28)' : 'rgba(255,92,92,0.28)';
-                    ctx.fillRect(x - bodyW/2, volY + VOLUME_H - 4 - bh, bodyW, bh);
-                });
-                ctx.fillStyle = isLight ? '#8e8e93' : '#666680';
-                ctx.font = '9px -apple-system,sans-serif';
-                ctx.textAlign = 'right';
-                ctx.fillText('Vol', W - 2, H - 2);
-            }
-
-            // Date labels
-            ctx.fillStyle = isLight ? '#8e8e93' : '#666680';
-            ctx.font = '9px -apple-system,sans-serif';
-            ctx.textAlign = 'center';
-            const every = Math.max(1, Math.floor(n / 8));
-            dates.forEach((d, i) => { if (i % every === 0) ctx.fillText(d, toX(i), CHART_H + DATE_H - 2); });
+        // --- Chart State (zoom/pan per ticker) ---
+        // zoomState[ticker] = { start: 0.0, end: 1.0 } — fraction of total data visible
+        const zoomState = {};
+        function getZoom(ticker, totalLen) {
+            if (!zoomState[ticker]) zoomState[ticker] = { start: 0, end: 1 };
+            const z = zoomState[ticker];
+            const s = Math.max(0, Math.min(1, z.start));
+            const e = Math.max(0, Math.min(1, z.end));
+            const minWindow = Math.max(10, Math.floor(totalLen * 0.05));
+            const startIdx = Math.floor(s * totalLen);
+            const endIdx = Math.min(totalLen, Math.max(startIdx + minWindow, Math.ceil(e * totalLen)));
+            return { startIdx, endIdx };
         }
+        function zoomIn(ticker, totalLen) {
+            if (!zoomState[ticker]) zoomState[ticker] = { start:0, end:1 };
+            const z = zoomState[ticker];
+            const mid = (z.start + z.end) / 2;
+            const half = (z.end - z.start) * 0.3;
+            zoomState[ticker] = { start: Math.max(0, mid-half), end: Math.min(1, mid+half) };
+        }
+        function zoomOut(ticker, totalLen) {
+            if (!zoomState[ticker]) zoomState[ticker] = { start:0, end:1 };
+            const z = zoomState[ticker];
+            const mid = (z.start + z.end) / 2;
+            const half = (z.end - z.start) * 0.85;
+            zoomState[ticker] = { start: Math.max(0, mid-half), end: Math.min(1, mid+half) };
+        }
+        function zoomReset(ticker) { zoomState[ticker] = { start:0, end:1 }; }
 
+        // --- Master Chart Draw ---
+        // Single pure-canvas renderer. No Chart.js for the chart itself.
+        // Layout: [price+overlays pane] + [oscillator pane if RSI/MACD active]
         function drawChart(ticker) {
             const data = appState.dataCache[ticker];
             if (!data || !Array.isArray(data.prices) || !data.prices.length || !data.computed) return;
+
             const canvas = document.getElementById('canvas-' + ticker);
             if (!canvas) return;
             ensureTickerState(ticker);
@@ -1415,269 +1323,431 @@ Signal line = EMA(9) of MACD line</span>
             const computed = data.computed;
             const isLight = document.body.classList.contains('light-mode');
 
-            const sl = Math.min(CONFIG.CHART_WINDOW_DAYS, data.prices.length);
-            const prices = data.prices.slice(-sl);
-            const dates = (data.dates || []).slice(-sl);
-            const ohlc = (data.ohlc || []).slice(-sl);
-            if (!prices.length) return;
+            // Full dataset
+            const allPrices = data.prices;
+            const allDates  = data.dates || [];
+            const allOhlc   = data.ohlc  || [];
+            const hasOhlc   = allOhlc.length === allPrices.length && allOhlc.some(c => c && c.h !== null);
 
-            const hasOhlc = ohlc.length === prices.length && ohlc.some(c => c && c.h !== null);
+            // Apply zoom window
+            const { startIdx, endIdx } = getZoom(ticker, allPrices.length);
+            const prices = allPrices.slice(startIdx, endIdx);
+            const dates  = allDates.slice(startIdx, endIdx);
+            const ohlc   = allOhlc.slice(startIdx, endIdx);
+            const sl     = prices.length;
+            if (!sl) return;
 
-            // Draw candlesticks on background canvas
-            if (hasOhlc) {
-                drawCandleCanvas(ticker, ohlc, dates, inds, isLight);
-            }
+            // Sliced computed arrays
+            const sliceArr = (arr) => arr ? arr.slice(startIdx, endIdx) : [];
 
-            // Overlay colors
-            const cSma = '#f5a623', cSma20 = '#5ac8fa', cSma200 = '#ff9f7f', cEma20 = '#a78bfa';
-            const cBb = isLight ? 'rgba(0,0,0,0.25)' : 'rgba(255,255,255,0.35)';
-            const cRsi = '#b58900', cMacd = '#d33682';
-            const tickColor = isLight ? '#8e8e93' : '#666680';
-            const tooltipBg = isLight ? 'rgba(255,255,255,0.95)' : 'rgba(17,17,24,0.95)';
-            const tooltipText = isLight ? '#000' : '#fff';
-            const gridColor = isLight ? '#e5e5ea' : '#1e1e2a';
+            // Canvas sizing
+            const wrapper = canvas.parentElement;
+            const W = wrapper.clientWidth  || 360;
+            const hasOsc = inds.rsi || inds.macd;
+            const OSC_H  = hasOsc ? 100 : 0;
+            const VOL_H  = (inds.volume && hasOhlc) ? Math.floor((W < 400 ? 220 : 260) * 0.18) : 0;
+            const PRICE_H = (W < 400 ? 220 : 260) - VOL_H;
+            const TOTAL_H = PRICE_H + VOL_H + (hasOsc ? OSC_H + 4 : 0) + 20; // +20 for date axis
+            const DATE_H  = 20;
+            const PAD_L   = 4;
+            const PAD_R   = 54;
+            const CW      = W - PAD_L - PAD_R;
 
-            let datasets = [];
-            if (!hasOhlc) {
-                datasets.push({ label:'Price', data:prices,
-                    borderColor: prices[prices.length-1] >= prices[prices.length-2] ? '#00d395' : '#ff5c5c',
-                    borderWidth:2, pointRadius:0, fill:false, tension:0.1, yAxisID:'y' });
-            }
-            if (inds.sma && computed.sma) datasets.push({ label:'SMA 50', data:computed.sma.slice(-sl), borderColor:cSma, borderWidth:1.5, borderDash:[5,5], pointRadius:0, yAxisID:'y' });
-            if (inds.sma20 && computed.sma20) datasets.push({ label:'SMA 20', data:computed.sma20.slice(-sl), borderColor:cSma20, borderWidth:1.5, borderDash:[5,5], pointRadius:0, yAxisID:'y' });
-            if (inds.sma200 && computed.sma200) datasets.push({ label:'SMA 200', data:computed.sma200.slice(-sl), borderColor:cSma200, borderWidth:2, borderDash:[8,4], pointRadius:0, yAxisID:'y' });
-            if (inds.ema20 && computed.ema20) datasets.push({ label:'EMA 20', data:computed.ema20.slice(-sl), borderColor:cEma20, borderWidth:1.5, pointRadius:0, yAxisID:'y' });
-            if (inds.bb && computed.bb) {
-                datasets.push({ label:'BB Upper', data:computed.bb.upper.slice(-sl), borderColor:cBb, borderWidth:1, pointRadius:0, yAxisID:'y' });
-                datasets.push({ label:'BB Lower', data:computed.bb.lower.slice(-sl), borderColor:cBb, borderWidth:1, pointRadius:0, yAxisID:'y' });
-            }
-            const hasOscillator = inds.rsi || inds.macd;
-            if (inds.rsi && computed.rsi) datasets.push({ label:'RSI', data:computed.rsi.slice(-sl), borderColor:cRsi, borderWidth:1.5, pointRadius:0, yAxisID:'y2', spanGaps:true });
-            if (inds.macd && computed.macd) {
-                datasets.push({ label:'MACD', data:computed.macd.macd.slice(-sl), borderColor:cMacd, borderWidth:1.5, pointRadius:0, yAxisID:'y2', spanGaps:true });
-                datasets.push({ label:'Signal', data:computed.macd.signal.slice(-sl), borderColor:'#859900', borderWidth:1, pointRadius:0, yAxisID:'y2', spanGaps:true });
-            }
+            canvas.width  = W;
+            canvas.height = TOTAL_H;
+            canvas.style.height = TOTAL_H + 'px';
+            wrapper.style.height = TOTAL_H + 'px';
 
-            // Price scale aligned to OHLC range so overlays align with candles
-            let yMin, yMax;
-            if (hasOhlc) {
-                const valid = ohlc.filter(c => c && c.h !== null);
-                yMax = Math.max(...valid.map(c => c.h));
-                yMin = Math.min(...valid.map(c => c.l));
-                const pad = (yMax - yMin) * 0.06 || 1;
-                yMax += pad; yMin -= pad;
-            }
+            const ctx = canvas.getContext('2d');
+            ctx.clearRect(0, 0, W, TOTAL_H);
 
-            let scales = {
-                x: { display: !hasOhlc, ticks:{ color:tickColor, maxRotation:0, autoSkip:true, maxTicksLimit:10 }, grid:{ display:false } },
-                y: { type:'linear', position:'right', display:!hasOhlc,
-                     min:yMin, max:yMax,
-                     ticks:{ color:tickColor }, grid:{ color: hasOhlc ? 'transparent' : gridColor } },
+            // Colors
+            const C = {
+                grid:    isLight ? '#e5e5ea' : '#1e1e2a',
+                tick:    isLight ? '#8e8e93' : '#666680',
+                bull:    '#00d395',
+                bear:    '#ff5c5c',
+                sma50:   '#f5a623',
+                sma20:   '#5ac8fa',
+                sma200:  '#ff9f7f',
+                ema20:   '#a78bfa',
+                bb:      isLight ? 'rgba(100,100,200,0.4)' : 'rgba(160,160,255,0.4)',
+                rsi:     '#b58900',
+                macd:    '#d33682',
+                sig:     '#859900',
+                divider: isLight ? '#d0d0da' : '#2a2a3a',
             };
-            if (hasOhlc) {
-                // Hidden y scale still needed so overlay lines get correct pixel positions
-                scales.y = { type:'linear', position:'right', display:false, min:yMin, max:yMax, grid:{ display:false } };
-            }
-            if (hasOscillator) {
-                scales.y2 = { type:'linear', position:'left', ticks:{ color:tickColor }, grid:{ display:false },
-                    min:(inds.rsi&&!inds.macd)?0:undefined, max:(inds.rsi&&!inds.macd)?100:undefined };
+
+            // ── HELPERS ──
+            const slotW = CW / sl;
+            const bodyW = Math.max(1, Math.min(10, slotW * 0.6));
+            const toX   = (i) => PAD_L + (i + 0.5) * slotW;
+
+            function makeYScale(values, top, height, pad=0.06) {
+                const valids = values.filter(v => v !== null && v !== undefined && !isNaN(v));
+                if (!valids.length) return null;
+                let vMax = Math.max(...valids);
+                let vMin = Math.min(...valids);
+                const p = (vMax - vMin) * pad || 1;
+                vMax += p; vMin -= p;
+                const range = vMax - vMin;
+                return {
+                    vMax, vMin, range,
+                    toY: (v) => top + height * (1 - (v - vMin) / range),
+                    drawGrid: (steps=4, prefix='$', decimals=2) => {
+                        ctx.font = '10px -apple-system,sans-serif';
+                        ctx.textAlign = 'right';
+                        for (let i=0; i<=steps; i++) {
+                            const v = vMin + (range * i / steps);
+                            const y = top + height * (1 - i/steps);
+                            ctx.strokeStyle = C.grid; ctx.lineWidth = 0.5;
+                            ctx.beginPath(); ctx.moveTo(PAD_L, y); ctx.lineTo(W-PAD_R+2, y); ctx.stroke();
+                            ctx.fillStyle = C.tick;
+                            ctx.fillText(prefix + v.toFixed(decimals), W-2, y+3);
+                        }
+                    }
+                };
             }
 
-            canvas.style.background = 'transparent';
-            if (window.myCharts[ticker]) window.myCharts[ticker].destroy();
+            // ── PRICE PANE ──
+            const priceTop  = 0;
+            const priceH    = PRICE_H;
+            const volTop    = priceTop + priceH;
 
-            if (datasets.length > 0) {
-                window.myCharts[ticker] = new Chart(canvas.getContext('2d'), {
-                    type:'line', data:{ labels:dates, datasets },
-                    options:{ responsive:true, maintainAspectRatio:false, animation:false,
-                        interaction:{ mode:'index', intersect:false },
-                        plugins:{ legend:{ display:false },
-                            tooltip:{ padding:10, backgroundColor:tooltipBg, titleColor:tooltipText, bodyColor:tooltipText } },
-                        scales },
+            // Price scale from OHLC highs/lows (or prices if no OHLC)
+            const priceValues = hasOhlc
+                ? [...ohlc.filter(c=>c&&c.h!==null).flatMap(c=>[c.h,c.l])]
+                : prices;
+            const priceScale = makeYScale(priceValues, priceTop, priceH);
+            if (!priceScale) return;
+
+            priceScale.drawGrid(4, '$', 2);
+
+            // Pivot lines
+            if (inds.pivot && hasOhlc) {
+                const pv = getPivotPoints(ohlc);
+                if (pv) {
+                    [{v:pv.r2,l:'R2',c:'#ff5c5c'},{v:pv.r1,l:'R1',c:'#ff9f7f'},
+                     {v:pv.pp,l:'PP',c:isLight?'#6060c8':'#a0a0ff'},
+                     {v:pv.s1,l:'S1',c:'#5ac8fa'},{v:pv.s2,l:'S2',c:'#00d395'}].forEach(({v,l,c}) => {
+                        if (v < priceScale.vMin || v > priceScale.vMax) return;
+                        const y = priceScale.toY(v);
+                        ctx.save(); ctx.strokeStyle=c; ctx.lineWidth=1; ctx.setLineDash([4,4]);
+                        ctx.beginPath(); ctx.moveTo(PAD_L,y); ctx.lineTo(W-PAD_R,y); ctx.stroke();
+                        ctx.setLineDash([]); ctx.fillStyle=c; ctx.font='bold 9px -apple-system,sans-serif'; ctx.textAlign='left';
+                        ctx.fillText(l, PAD_L+3, y-2); ctx.restore();
+                    });
+                }
+            }
+
+            // MA overlays on price pane
+            const drawLine = (arr, color, dash=[]) => {
+                if (!arr || !arr.length) return;
+                ctx.save(); ctx.strokeStyle=color; ctx.lineWidth=1.5; ctx.setLineDash(dash);
+                ctx.beginPath(); let started=false;
+                arr.forEach((v,i) => {
+                    if (v===null||v===undefined||isNaN(v)) { started=false; return; }
+                    const x=toX(i), y=priceScale.toY(v);
+                    if (!started) { ctx.moveTo(x,y); started=true; } else { ctx.lineTo(x,y); }
                 });
+                ctx.stroke(); ctx.setLineDash([]); ctx.restore();
+            };
+            if (inds.sma   && computed.sma)   drawLine(sliceArr(computed.sma),   C.sma50,  [5,5]);
+            if (inds.sma20 && computed.sma20)  drawLine(sliceArr(computed.sma20), C.sma20,  [5,5]);
+            if (inds.sma200&& computed.sma200) drawLine(sliceArr(computed.sma200),C.sma200, [8,4]);
+            if (inds.ema20 && computed.ema20)  drawLine(sliceArr(computed.ema20), C.ema20);
+            if (inds.bb && computed.bb) {
+                drawLine(sliceArr(computed.bb.upper), C.bb);
+                drawLine(sliceArr(computed.bb.lower), C.bb);
+                // BB fill
+                const upper=sliceArr(computed.bb.upper), lower=sliceArr(computed.bb.lower);
+                ctx.save(); ctx.fillStyle=isLight?'rgba(100,100,200,0.05)':'rgba(160,160,255,0.07)';
+                ctx.beginPath(); let s2=false;
+                upper.forEach((v,i)=>{ if(v===null||isNaN(v)){s2=false;return;} const x=toX(i),y=priceScale.toY(v); if(!s2){ctx.moveTo(x,y);s2=true;}else ctx.lineTo(x,y); });
+                for(let i=lower.length-1;i>=0;i--){ const v=lower[i]; if(v===null||isNaN(v))continue; ctx.lineTo(toX(i),priceScale.toY(v)); }
+                ctx.closePath(); ctx.fill(); ctx.restore();
             }
 
-            // Legend
-            const lastValid = (arr) => {
-                if (!arr?.length) return null;
-                for (let i=arr.length-1; i>=0; i--) { if (arr[i]!==null&&arr[i]!==undefined&&!isNaN(arr[i])) return arr[i]; }
-                return null;
-            };
-            const fmt = (v,d) => v===null?'—':Number(v).toFixed(d);
-            const last = ohlc.length ? ohlc[ohlc.length-1] : null;
-            let items = [];
-            if (last?.o !== null && last?.o !== undefined) {
-                items.push({ name:'O', color:tickColor, value:fmt(last.o,2) });
-                items.push({ name:'H', color:'#00d395', value:fmt(last.h,2) });
-                items.push({ name:'L', color:'#ff5c5c', value:fmt(last.l,2) });
-                items.push({ name:'C', color:last.c>=last.o?'#00d395':'#ff5c5c', value:fmt(last.c,2) });
-                if (inds.volume&&last.v) items.push({ name:'Vol', color:tickColor, value:(last.v/1e6).toFixed(2)+'M' });
-            } else { items.push({ name:'Price', color:'#00d395', value:fmt(prices[prices.length-1],2) }); }
-            if (inds.sma&&computed.sma) items.push({ name:'SMA50', color:cSma, value:fmt(lastValid(computed.sma),2) });
-            if (inds.sma20&&computed.sma20) items.push({ name:'SMA20', color:cSma20, value:fmt(lastValid(computed.sma20),2) });
-            if (inds.sma200&&computed.sma200) items.push({ name:'SMA200', color:cSma200, value:fmt(lastValid(computed.sma200),2) });
-            if (inds.ema20&&computed.ema20) items.push({ name:'EMA20', color:cEma20, value:fmt(lastValid(computed.ema20),2) });
-            if (inds.bb&&computed.bb) { items.push({ name:'BB↑', color:cBb, value:fmt(lastValid(computed.bb.upper),2) }); items.push({ name:'BB↓', color:cBb, value:fmt(lastValid(computed.bb.lower),2) }); }
-            if (inds.rsi&&computed.rsi) items.push({ name:'RSI', color:cRsi, value:fmt(lastValid(computed.rsi),1) });
-            if (inds.macd&&computed.macd) { items.push({ name:'MACD', color:cMacd, value:fmt(lastValid(computed.macd.macd),2) }); items.push({ name:'Sig', color:'#859900', value:fmt(lastValid(computed.macd.signal),2) }); }
-            if (computed.adx) { const v=lastValid(computed.adx); items.push({ name:'ADX', color:v!==null&&v>25?'#00d395':'#ff5c5c', value:v===null?'—':v.toFixed(1) }); }
-            const legendEl = document.getElementById('legend-' + ticker);
-            if (legendEl) legendEl.innerHTML = items.map(it=>`<span class="legend-item"><span class="legend-dot" style="background:${it.color}"></span><span class="legend-name">${it.name}</span><span class="legend-value">${it.value}</span></span>`).join('');
+            // Candlesticks
+            if (hasOhlc) {
+                ohlc.forEach((c,i) => {
+                    if (!c||c.h===null) return;
+                    const isBull=c.c>=c.o, color=isBull?C.bull:C.bear, x=toX(i);
+                    ctx.strokeStyle=color; ctx.lineWidth=1;
+                    ctx.beginPath(); ctx.moveTo(x,priceScale.toY(c.h)); ctx.lineTo(x,priceScale.toY(c.l)); ctx.stroke();
+                    const bTop=Math.min(priceScale.toY(c.o),priceScale.toY(c.c));
+                    const bH=Math.max(1,Math.abs(priceScale.toY(c.c)-priceScale.toY(c.o)));
+                    ctx.fillStyle=isBull?'rgba(0,211,149,0.35)':color;
+                    ctx.fillRect(x-bodyW/2,bTop,bodyW,bH); ctx.strokeRect(x-bodyW/2,bTop,bodyW,bH);
+                });
+            } else {
+                drawLine(prices, prices[prices.length-1]>=prices[0]?C.bull:C.bear);
+            }
 
-            // --- Crosshair / Scrubber ---
-            // Top-layer transparent canvas captures pointer/touch events and draws
-            // a vertical crosshair line + shows all indicator values at the hovered candle.
-            const crossCanvas = document.getElementById('canvas-cross-' + ticker);
-            if (!crossCanvas) return;
+            // Swing markers
+            if (inds.swing && hasOhlc) {
+                const {highs,lows}=getSwingPoints(ohlc);
+                const tri=(x,y,up,color)=>{
+                    ctx.save(); ctx.fillStyle=color; ctx.beginPath();
+                    const s=5,off=6;
+                    if(up){ctx.moveTo(x,y-off-s*1.5);ctx.lineTo(x-s,y-off);ctx.lineTo(x+s,y-off);}
+                    else  {ctx.moveTo(x,y+off+s*1.5);ctx.lineTo(x-s,y+off);ctx.lineTo(x+s,y+off);}
+                    ctx.closePath(); ctx.fill(); ctx.restore();
+                };
+                highs.forEach(p=>{if(p.x<sl)tri(toX(p.x),priceScale.toY(p.y),false,C.bear);});
+                lows.forEach(p=>{if(p.x<sl)tri(toX(p.x),priceScale.toY(p.y),true,C.bull);});
+            }
 
-            // Store layout params so the event handler can convert pointer X → candle index
-            const wrapper = crossCanvas.parentElement;
-            const layoutW = wrapper.clientWidth || 360;
-            const layoutH = wrapper.clientHeight || 280;
-            crossCanvas.width = layoutW;
-            crossCanvas.height = layoutH;
-            const VOLUME_H = inds.volume && hasOhlc ? Math.floor(layoutH * 0.18) : 0;
-            const DATE_H = 16;
-            const CHART_H = layoutH - VOLUME_H - DATE_H;
-            const PAD_R = 52;
-            const PAD_L = 4;
-            const CHART_W = layoutW - PAD_L - PAD_R;
-            const slotW2 = CHART_W / (ohlc.length || prices.length);
+            // Volume bars
+            if (inds.volume && hasOhlc && VOL_H > 0) {
+                const maxVol=Math.max(...ohlc.map(c=>c?.v||0))||1;
+                ohlc.forEach((c,i)=>{
+                    if(!c||!c.v)return;
+                    const bh=(c.v/maxVol)*(VOL_H-4);
+                    ctx.fillStyle=c.c>=c.o?'rgba(0,211,149,0.28)':'rgba(255,92,92,0.28)';
+                    ctx.fillRect(toX(i)-bodyW/2, volTop+VOL_H-4-bh, bodyW, bh);
+                });
+                ctx.fillStyle=C.tick; ctx.font='9px -apple-system,sans-serif'; ctx.textAlign='right';
+                ctx.fillText('Vol', W-2, volTop+12);
+            }
 
-            const xToIndex = (clientX) => {
-                const rect = crossCanvas.getBoundingClientRect();
-                const px = (clientX - rect.left) * (layoutW / rect.width);
-                const i = Math.round((px - PAD_L) / slotW2 - 0.5);
-                return Math.max(0, Math.min((ohlc.length || prices.length) - 1, i));
-            };
+            // ── OSCILLATOR PANE ──
+            if (hasOsc) {
+                const oscTop = PRICE_H + VOL_H + 4;
+                const oscH   = OSC_H;
 
-            // Remove old listeners by cloning the element (prevents duplicate handlers on re-render)
-            const newCross = crossCanvas.cloneNode(true);
-            crossCanvas.parentNode.replaceChild(newCross, crossCanvas);
+                // Divider line
+                ctx.strokeStyle=C.divider; ctx.lineWidth=1;
+                ctx.beginPath(); ctx.moveTo(PAD_L,oscTop); ctx.lineTo(W-PAD_R,oscTop); ctx.stroke();
 
-            // Recompute OHLC price range for horizontal price label on the right axis
-            const validOhlcForRange = ohlc.filter(c => c && c.h !== null);
-            const pMax2 = validOhlcForRange.length ? Math.max(...validOhlcForRange.map(c => c.h)) * 1.06 : null;
-            const pMin2 = validOhlcForRange.length ? Math.min(...validOhlcForRange.map(c => c.l)) * 0.94 : null;
-            const pRange2 = (pMax2 !== null && pMin2 !== null) ? pMax2 - pMin2 : null;
-            const toPriceY = (price) => pRange2 ? PAD_L + CHART_H * (1 - (price - pMin2) / pRange2) : null;
-
-            const drawCrosshair = (clientX) => {
-                // IMPORTANT: use newCross (the DOM-attached clone), not crossCanvas (detached original)
-                const ctx2 = newCross.getContext('2d');
-                ctx2.clearRect(0, 0, layoutW, layoutH);
-                const idx = xToIndex(clientX);
-                const x = PAD_L + (idx + 0.5) * slotW2;
-                const c = hasOhlc ? ohlc[idx] : null;
-                const closePrice = c ? c.c : prices[idx];
-
-                // Vertical crosshair line
-                ctx2.strokeStyle = isLight ? 'rgba(0,0,0,0.3)' : 'rgba(255,255,255,0.3)';
-                ctx2.lineWidth = 1;
-                ctx2.setLineDash([4, 3]);
-                ctx2.beginPath();
-                ctx2.moveTo(x, 0);
-                ctx2.lineTo(x, CHART_H + VOLUME_H);
-                ctx2.stroke();
-                ctx2.setLineDash([]);
-
-                // Date pill at bottom of the crosshair line
-                const dateLabel = dates[idx] || '';
-                ctx2.font = 'bold 10px -apple-system,sans-serif';
-                const dateLabelW = ctx2.measureText(dateLabel).width + 12;
-                const dateLabelX = Math.max(dateLabelW/2 + PAD_L, Math.min(layoutW - PAD_R - dateLabelW/2, x));
-                const datePillColor = isLight ? '#444' : '#bbb';
-                ctx2.fillStyle = datePillColor;
-                ctx2.beginPath();
-                ctx2.roundRect(dateLabelX - dateLabelW/2, CHART_H + 2, dateLabelW, DATE_H - 4, 4);
-                ctx2.fill();
-                ctx2.fillStyle = isLight ? '#fff' : '#111';
-                ctx2.textAlign = 'center';
-                ctx2.fillText(dateLabel, dateLabelX, CHART_H + DATE_H - 5);
-
-                // Price label on right axis at close price level
-                if (closePrice !== null && toPriceY) {
-                    const priceY = toPriceY(closePrice);
-                    if (priceY !== null && priceY > 0 && priceY < CHART_H) {
-                        // Horizontal dotted line to right axis
-                        ctx2.strokeStyle = isLight ? 'rgba(0,0,0,0.2)' : 'rgba(255,255,255,0.2)';
-                        ctx2.lineWidth = 1;
-                        ctx2.setLineDash([3, 3]);
-                        ctx2.beginPath();
-                        ctx2.moveTo(x, priceY);
-                        ctx2.lineTo(layoutW - PAD_R + 2, priceY);
-                        ctx2.stroke();
-                        ctx2.setLineDash([]);
-
-                        // Price pill on right axis
-                        const priceLabel = '$' + closePrice.toFixed(2);
-                        ctx2.font = 'bold 10px -apple-system,sans-serif';
-                        const priceLabelW = ctx2.measureText(priceLabel).width + 8;
-                        const priceColor = c ? (c.c >= c.o ? '#00d395' : '#ff5c5c') : '#00d395';
-                        ctx2.fillStyle = priceColor;
-                        ctx2.beginPath();
-                        ctx2.roundRect(layoutW - PAD_R + 3, priceY - 8, priceLabelW, 16, 3);
-                        ctx2.fill();
-                        ctx2.fillStyle = '#fff';
-                        ctx2.textAlign = 'left';
-                        ctx2.fillText(priceLabel, layoutW - PAD_R + 7, priceY + 4);
+                if (inds.rsi && computed.rsi) {
+                    const rsiArr = sliceArr(computed.rsi);
+                    const oscScale = makeYScale([0,100], oscTop, oscH, 0);
+                    if (oscScale) {
+                        // Grid lines at 30/50/70
+                        [30,50,70].forEach(level => {
+                            const y = oscScale.toY(level);
+                            ctx.strokeStyle=level===50?C.grid:'rgba(180,120,0,0.3)'; ctx.lineWidth=0.5;
+                            ctx.setLineDash(level===50?[]:[3,3]);
+                            ctx.beginPath(); ctx.moveTo(PAD_L,y); ctx.lineTo(W-PAD_R,y); ctx.stroke();
+                            ctx.setLineDash([]);
+                            ctx.fillStyle=C.tick; ctx.font='9px -apple-system,sans-serif'; ctx.textAlign='right';
+                            ctx.fillText(level, W-2, y+3);
+                        });
+                        // RSI fill zones
+                        ctx.save();
+                        ctx.fillStyle='rgba(255,92,92,0.1)';
+                        ctx.fillRect(PAD_L, oscTop, CW, oscScale.toY(70)-oscTop);
+                        ctx.fillStyle='rgba(0,211,149,0.1)';
+                        ctx.fillRect(PAD_L, oscScale.toY(30), CW, oscTop+oscH-oscScale.toY(30));
+                        ctx.restore();
+                        // RSI line
+                        ctx.save(); ctx.strokeStyle=C.rsi; ctx.lineWidth=1.5;
+                        ctx.beginPath(); let s3=false;
+                        rsiArr.forEach((v,i)=>{ if(v===null||isNaN(v)){s3=false;return;} const x=toX(i),y=oscScale.toY(Math.max(0,Math.min(100,v))); if(!s3){ctx.moveTo(x,y);s3=true;}else ctx.lineTo(x,y); });
+                        ctx.stroke(); ctx.restore();
+                        // RSI label
+                        ctx.fillStyle=C.rsi; ctx.font='bold 9px -apple-system,sans-serif'; ctx.textAlign='left';
+                        ctx.fillText('RSI', PAD_L+3, oscTop+12);
                     }
                 }
 
-                // Update the tooltip div below the chart
-                const fmt2 = (v, d=2) => (v===null||v===undefined||isNaN(v)) ? '—' : Number(v).toFixed(d);
-                const tooltipEl = document.getElementById('xhair-' + ticker);
-                if (!tooltipEl) return;
-
-                const parts = [];
-                if (c && c.o !== null) {
-                    parts.push({ name: 'O', color: '#888', val: fmt2(c.o) });
-                    parts.push({ name: 'H', color: '#00d395', val: fmt2(c.h) });
-                    parts.push({ name: 'L', color: '#ff5c5c', val: fmt2(c.l) });
-                    parts.push({ name: 'C', color: c.c >= c.o ? '#00d395' : '#ff5c5c', val: fmt2(c.c) });
-                    if (inds.volume && c.v) parts.push({ name: 'Vol', color: '#888', val: (c.v/1e6).toFixed(2)+'M' });
-                } else {
-                    parts.push({ name: 'Price', color: '#00d395', val: fmt2(prices[idx]) });
-                }
-                const getAt = (arr, i) => (arr && arr[i] !== undefined) ? arr[i] : null;
-                if (inds.sma && computed.sma) parts.push({ name:'SMA50', color:'#f5a623', val:fmt2(getAt(computed.sma.slice(-sl), idx)) });
-                if (inds.sma20 && computed.sma20) parts.push({ name:'SMA20', color:'#5ac8fa', val:fmt2(getAt(computed.sma20.slice(-sl), idx)) });
-                if (inds.sma200 && computed.sma200) parts.push({ name:'SMA200', color:'#ff9f7f', val:fmt2(getAt(computed.sma200.slice(-sl), idx)) });
-                if (inds.ema20 && computed.ema20) parts.push({ name:'EMA20', color:'#a78bfa', val:fmt2(getAt(computed.ema20.slice(-sl), idx)) });
-                if (inds.bb && computed.bb) {
-                    parts.push({ name:'BB↑', color:'rgba(140,140,220,1)', val:fmt2(getAt(computed.bb.upper.slice(-sl), idx)) });
-                    parts.push({ name:'BB↓', color:'rgba(140,140,220,1)', val:fmt2(getAt(computed.bb.lower.slice(-sl), idx)) });
-                }
-                if (inds.rsi && computed.rsi) parts.push({ name:'RSI', color:'#b58900', val:fmt2(getAt(computed.rsi.slice(-sl), idx), 1) });
                 if (inds.macd && computed.macd) {
-                    parts.push({ name:'MACD', color:'#d33682', val:fmt2(getAt(computed.macd.macd.slice(-sl), idx)) });
-                    parts.push({ name:'Sig', color:'#859900', val:fmt2(getAt(computed.macd.signal.slice(-sl), idx)) });
+                    const macdArr  = sliceArr(computed.macd.macd);
+                    const sigArr   = sliceArr(computed.macd.signal);
+                    const combined = [...macdArr, ...sigArr].filter(v=>v!==null&&!isNaN(v));
+                    const oscScale = makeYScale(combined, oscTop, oscH);
+                    if (oscScale) {
+                        // Zero line
+                        if (oscScale.vMin < 0 && oscScale.vMax > 0) {
+                            const zeroY = oscScale.toY(0);
+                            ctx.strokeStyle=C.divider; ctx.lineWidth=0.5;
+                            ctx.beginPath(); ctx.moveTo(PAD_L,zeroY); ctx.lineTo(W-PAD_R,zeroY); ctx.stroke();
+                        }
+                        // MACD histogram (difference bars)
+                        macdArr.forEach((v,i)=>{
+                            if(v===null||isNaN(v)||!sigArr[i]||isNaN(sigArr[i]))return;
+                            const diff=v-sigArr[i];
+                            const zeroY=oscScale.vMin<0&&oscScale.vMax>0?oscScale.toY(0):oscScale.toY(oscScale.vMin);
+                            const topY=oscScale.toY(diff);
+                            const bh=Math.abs(topY-zeroY)||1;
+                            ctx.fillStyle=diff>=0?'rgba(0,211,149,0.4)':'rgba(255,92,92,0.4)';
+                            ctx.fillRect(toX(i)-bodyW/2, Math.min(topY,zeroY), bodyW, bh);
+                        });
+                        // MACD + Signal lines
+                        const drawOscLine=(arr,color,dash=[])=>{
+                            ctx.save(); ctx.strokeStyle=color; ctx.lineWidth=1.5; ctx.setLineDash(dash);
+                            ctx.beginPath(); let st=false;
+                            arr.forEach((v,i)=>{ if(v===null||isNaN(v)){st=false;return;} const x=toX(i),y=oscScale.toY(v); if(!st){ctx.moveTo(x,y);st=true;}else ctx.lineTo(x,y); });
+                            ctx.stroke(); ctx.setLineDash([]); ctx.restore();
+                        };
+                        drawOscLine(macdArr, C.macd);
+                        drawOscLine(sigArr,  C.sig, [3,3]);
+                        ctx.fillStyle=C.macd; ctx.font='bold 9px -apple-system,sans-serif'; ctx.textAlign='left';
+                        ctx.fillText('MACD', PAD_L+3, oscTop+12);
+                    }
+                }
+            }
+
+            // ── DATE AXIS ──
+            const dateY = PRICE_H + VOL_H + (hasOsc ? OSC_H+4 : 0) + DATE_H - 4;
+            ctx.fillStyle=C.tick; ctx.font='9px -apple-system,sans-serif'; ctx.textAlign='center';
+            const every=Math.max(1,Math.floor(sl/8));
+            dates.forEach((d,i)=>{ if(i%every===0) ctx.fillText(d, toX(i), dateY); });
+
+            // ── CROSSHAIR CANVAS ──
+            const crossCanvas = document.getElementById('canvas-cross-' + ticker);
+            if (!crossCanvas) return;
+            crossCanvas.width  = W;
+            crossCanvas.height = TOTAL_H;
+            crossCanvas.style.height = TOTAL_H + 'px';
+
+            // Store layout for crosshair reuse
+            crossCanvas._layout = { W, PRICE_H, VOL_H, OSC_H, DATE_H, hasOsc, PAD_L, PAD_R, CW, sl, slotW, priceScale, isLight, C, hasOhlc, ohlc, prices, dates, inds, computed, startIdx, endIdx };
+
+            const newCross = crossCanvas.cloneNode(true);
+            newCross._layout = crossCanvas._layout;
+            crossCanvas.parentNode.replaceChild(newCross, crossCanvas);
+
+            const drawCrosshair = (clientX, clientY) => {
+                const L = newCross._layout;
+                if (!L) return;
+                const rect  = newCross.getBoundingClientRect();
+                const px    = (clientX - rect.left) * (L.W / rect.width);
+                const idx   = Math.max(0, Math.min(L.sl-1, Math.round((px-L.PAD_L)/L.slotW-0.5)));
+                const x     = L.PAD_L + (idx+0.5)*L.slotW;
+                const ctx2  = newCross.getContext('2d');
+                ctx2.clearRect(0, 0, L.W, newCross.height);
+
+                // Vertical line
+                ctx2.strokeStyle=L.isLight?'rgba(0,0,0,0.25)':'rgba(255,255,255,0.25)';
+                ctx2.lineWidth=1; ctx2.setLineDash([4,3]);
+                ctx2.beginPath(); ctx2.moveTo(x,0); ctx2.lineTo(x, newCross.height-L.DATE_H); ctx2.stroke(); ctx2.setLineDash([]);
+
+                // Date pill
+                const dateLabel=L.dates[idx]||'';;
+                ctx2.font='bold 10px -apple-system,sans-serif'; ctx2.textAlign='center';
+                const dw=ctx2.measureText(dateLabel).width+12;
+                const dx=Math.max(dw/2+L.PAD_L, Math.min(L.W-L.PAD_R-dw/2, x));
+                ctx2.fillStyle=L.isLight?'#444':'#bbb';
+                ctx2.roundRect(dx-dw/2, newCross.height-L.DATE_H+2, dw, L.DATE_H-6, 4); ctx2.fill();
+                ctx2.fillStyle=L.isLight?'#fff':'#111'; ctx2.fillText(dateLabel, dx, newCross.height-L.DATE_H+L.DATE_H-8);
+
+                // Price label on right axis
+                const c=L.hasOhlc?L.ohlc[idx]:null;
+                const closePrice=c?c.c:L.prices[idx];
+                if (closePrice!==null && L.priceScale) {
+                    const py=L.priceScale.toY(closePrice);
+                    if (py>0 && py<L.PRICE_H) {
+                        // Horizontal dotted line
+                        ctx2.strokeStyle=L.isLight?'rgba(0,0,0,0.15)':'rgba(255,255,255,0.15)';
+                        ctx2.lineWidth=1; ctx2.setLineDash([3,3]);
+                        ctx2.beginPath(); ctx2.moveTo(x,py); ctx2.lineTo(L.W-L.PAD_R+2,py); ctx2.stroke(); ctx2.setLineDash([]);
+                        // Price pill
+                        const priceLabel='$'+closePrice.toFixed(2);
+                        ctx2.font='bold 10px -apple-system,sans-serif'; ctx2.textAlign='left';
+                        const pw=ctx2.measureText(priceLabel).width+8;
+                        const priceColor=c?(c.c>=c.o?'#00d395':'#ff5c5c'):'#00d395';
+                        ctx2.fillStyle=priceColor;
+                        ctx2.roundRect(L.W-L.PAD_R+3, py-8, pw, 16, 3); ctx2.fill();
+                        ctx2.fillStyle='#fff'; ctx2.fillText(priceLabel, L.W-L.PAD_R+7, py+4);
+                    }
                 }
 
-                tooltipEl.style.display = 'flex';
-                tooltipEl.innerHTML = `<span style="font-size:0.7rem;color:var(--text-sub);font-weight:700;margin-right:4px;">${dateLabel}</span>` +
-                    parts.map(p =>
-                        `<span class="xhair-item"><span class="xhair-dot" style="background:${p.color}"></span><span class="xhair-name">${p.name}</span><span class="xhair-val">${p.val}</span></span>`
-                    ).join('');
+                // Tooltip below chart
+                const fmt=(v,d=2)=>(v===null||v===undefined||isNaN(v))?'—':Number(v).toFixed(d);
+                const getAt=(arr,i)=>(arr&&arr[i]!==undefined)?arr[i]:null;
+                const parts=[];
+                if(c&&c.o!==null){
+                    parts.push({n:'O',c:'#888',v:fmt(c.o)});
+                    parts.push({n:'H',c:'#00d395',v:fmt(c.h)});
+                    parts.push({n:'L',c:'#ff5c5c',v:fmt(c.l)});
+                    parts.push({n:'C',c:c.c>=c.o?'#00d395':'#ff5c5c',v:fmt(c.c)});
+                    if(L.inds.volume&&c.v)parts.push({n:'Vol',c:'#888',v:(c.v/1e6).toFixed(2)+'M'});
+                } else { parts.push({n:'Price',c:'#00d395',v:fmt(L.prices[idx])}); }
+                const comp2=L.computed;
+                if(L.inds.sma&&comp2.sma)parts.push({n:'SMA50',c:'#f5a623',v:fmt(getAt(comp2.sma.slice(L.startIdx,L.endIdx),idx))});
+                if(L.inds.sma20&&comp2.sma20)parts.push({n:'SMA20',c:'#5ac8fa',v:fmt(getAt(comp2.sma20.slice(L.startIdx,L.endIdx),idx))});
+                if(L.inds.sma200&&comp2.sma200)parts.push({n:'SMA200',c:'#ff9f7f',v:fmt(getAt(comp2.sma200.slice(L.startIdx,L.endIdx),idx))});
+                if(L.inds.ema20&&comp2.ema20)parts.push({n:'EMA20',c:'#a78bfa',v:fmt(getAt(comp2.ema20.slice(L.startIdx,L.endIdx),idx))});
+                if(L.inds.rsi&&comp2.rsi)parts.push({n:'RSI',c:'#b58900',v:fmt(getAt(comp2.rsi.slice(L.startIdx,L.endIdx),idx),1)});
+                if(L.inds.macd&&comp2.macd){
+                    parts.push({n:'MACD',c:'#d33682',v:fmt(getAt(comp2.macd.macd.slice(L.startIdx,L.endIdx),idx))});
+                    parts.push({n:'Sig',c:'#859900',v:fmt(getAt(comp2.macd.signal.slice(L.startIdx,L.endIdx),idx))});
+                }
+                const tip=document.getElementById('xhair-'+ticker);
+                if(tip){
+                    tip.style.display='flex';
+                    tip.innerHTML=`<span style="font-size:0.7rem;color:var(--text-sub);font-weight:700;margin-right:6px;">${dateLabel}</span>`
+                        +parts.map(p=>`<span class="xhair-item"><span class="xhair-dot" style="background:${p.c}"></span><span class="xhair-name">${p.n}</span><span class="xhair-val">${p.v}</span></span>`).join('');
+                }
             };
 
-            const clearCrosshair = () => {
-                const ctx2 = newCross.getContext('2d');
-                ctx2.clearRect(0, 0, layoutW, layoutH);
-                const tooltipEl = document.getElementById('xhair-' + ticker);
-                if (tooltipEl) tooltipEl.style.display = 'none';
+            const clearCrosshair=()=>{
+                const ctx2=newCross.getContext('2d'); ctx2.clearRect(0,0,newCross.width,newCross.height);
+                const tip=document.getElementById('xhair-'+ticker); if(tip)tip.style.display='none';
             };
 
-            // Mouse events
-            newCross.addEventListener('mousemove', (e) => drawCrosshair(e.clientX));
-            newCross.addEventListener('mouseleave', clearCrosshair);
+            newCross.addEventListener('mousemove',(e)=>drawCrosshair(e.clientX,e.clientY));
+            newCross.addEventListener('mouseleave',clearCrosshair);
+            newCross.addEventListener('touchstart',(e)=>{e.preventDefault();drawCrosshair(e.touches[0].clientX,e.touches[0].clientY);},{passive:false});
+            newCross.addEventListener('touchmove',(e)=>{e.preventDefault();drawCrosshair(e.touches[0].clientX,e.touches[0].clientY);},{passive:false});
+            newCross.addEventListener('touchend',(e)=>{e.preventDefault();},{passive:false});
 
-            // Touch events — scrub on touchmove, stay visible until next touch
-            newCross.addEventListener('touchstart', (e) => { e.preventDefault(); drawCrosshair(e.touches[0].clientX); }, { passive: false });
-            newCross.addEventListener('touchmove', (e) => { e.preventDefault(); drawCrosshair(e.touches[0].clientX); }, { passive: false });
-            newCross.addEventListener('touchend', (e) => { e.preventDefault(); /* keep visible — user lifts finger to read */ });
+            // Scroll wheel zoom
+            newCross.addEventListener('wheel',(e)=>{
+                e.preventDefault();
+                if(e.deltaY<0)zoomIn(ticker, allPrices.length);
+                else zoomOut(ticker, allPrices.length);
+                drawChart(ticker);
+            },{passive:false});
+
+            // Pinch-to-zoom (touch)
+            let lastPinchDist=null;
+            newCross.addEventListener('touchstart',(e)=>{
+                if(e.touches.length===2){
+                    lastPinchDist=Math.hypot(e.touches[0].clientX-e.touches[1].clientX, e.touches[0].clientY-e.touches[1].clientY);
+                }
+            },{passive:true});
+            newCross.addEventListener('touchmove',(e)=>{
+                if(e.touches.length===2&&lastPinchDist!==null){
+                    e.preventDefault();
+                    const dist=Math.hypot(e.touches[0].clientX-e.touches[1].clientX, e.touches[0].clientY-e.touches[1].clientY);
+                    if(dist>lastPinchDist*1.06)zoomIn(ticker,allPrices.length);
+                    else if(dist<lastPinchDist*0.94)zoomOut(ticker,allPrices.length);
+                    lastPinchDist=dist;
+                    drawChart(ticker);
+                }
+            },{passive:false});
+            newCross.addEventListener('touchend',()=>{lastPinchDist=null;},{passive:true});
+
+            // ── LEGEND ──
+            const lastValid=(arr)=>{
+                if(!arr?.length)return null;
+                for(let i=arr.length-1;i>=0;i--){if(arr[i]!==null&&arr[i]!==undefined&&!isNaN(arr[i]))return arr[i];}
+                return null;
+            };
+            const fmt2=(v,d=2)=>v===null?'—':Number(v).toFixed(d);
+            const lastC=hasOhlc?ohlc[ohlc.length-1]:null;
+            const items=[];
+            if(lastC?.o!==null&&lastC?.o!==undefined){
+                items.push({n:'O',c:'#888',v:fmt2(lastC.o)});
+                items.push({n:'H',c:C.bull,v:fmt2(lastC.h)});
+                items.push({n:'L',c:C.bear,v:fmt2(lastC.l)});
+                items.push({n:'C',c:lastC.c>=lastC.o?C.bull:C.bear,v:fmt2(lastC.c)});
+                if(inds.volume&&lastC.v)items.push({n:'Vol',c:'#888',v:(lastC.v/1e6).toFixed(2)+'M'});
+            } else { items.push({n:'Price',c:C.bull,v:fmt2(prices[prices.length-1])}); }
+            if(inds.sma&&computed.sma)items.push({n:'SMA50',c:C.sma50,v:fmt2(lastValid(sliceArr(computed.sma)))});
+            if(inds.sma20&&computed.sma20)items.push({n:'SMA20',c:C.sma20,v:fmt2(lastValid(sliceArr(computed.sma20)))});
+            if(inds.sma200&&computed.sma200)items.push({n:'SMA200',c:C.sma200,v:fmt2(lastValid(sliceArr(computed.sma200)))});
+            if(inds.ema20&&computed.ema20)items.push({n:'EMA20',c:C.ema20,v:fmt2(lastValid(sliceArr(computed.ema20)))});
+            if(inds.bb&&computed.bb){items.push({n:'BB↑',c:C.bb,v:fmt2(lastValid(sliceArr(computed.bb.upper)))});items.push({n:'BB↓',c:C.bb,v:fmt2(lastValid(sliceArr(computed.bb.lower)))});}
+            if(inds.rsi&&computed.rsi)items.push({n:'RSI',c:C.rsi,v:fmt2(lastValid(sliceArr(computed.rsi)),1)});
+            if(inds.macd&&computed.macd){items.push({n:'MACD',c:C.macd,v:fmt2(lastValid(sliceArr(computed.macd.macd)))});items.push({n:'Sig',c:C.sig,v:fmt2(lastValid(sliceArr(computed.macd.signal)))});}
+            if(computed.adx){const av=lastValid(sliceArr(computed.adx));items.push({n:'ADX',c:av!==null&&av>25?C.bull:C.bear,v:av===null?'—':av.toFixed(1)});}
+            const leg=document.getElementById('legend-'+ticker);
+            if(leg)leg.innerHTML=items.map(it=>`<span class="legend-item"><span class="legend-dot" style="background:${it.c}"></span><span class="legend-name">${it.n}</span><span class="legend-value">${it.v}</span></span>`).join('');
         }
-
         // --- App Interactions ---
         async function toggleUI(ticker, type, key) {
             if(type === 'panel') {
