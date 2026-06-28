@@ -732,9 +732,52 @@ Signal line = EMA(9) of MACD line</span>
         });
 
         // --- Math & Indicator Logic ---
-        function getSMAArray(prices, period = CONFIG.SMA_PERIOD) { return prices.map((v, i, arr) => i < period - 1 ? null : arr.slice(i - period + 1, i + 1).reduce((a,b)=>a+b)/period); }
-        function getEMAArray(prices, period) { let k = 2/(period+1), ema = [], prev = null; for(let i=0; i<prices.length; i++) { if(i===0){prev=prices[i];ema.push(prev);} else {prev=(prices[i]-prev)*k+prev;ema.push(prev);} } return ema; }
-        function getBBArray(prices, period = CONFIG.BB_PERIOD, mult = CONFIG.BB_MULT) { let upper=[], lower=[]; prices.forEach((v, i, arr)=>{ if(i<period-1){upper.push(null);lower.push(null);return;} let slice=arr.slice(i-period+1, i+1), mean=slice.reduce((a,b)=>a+b)/period, variance=slice.reduce((a,b)=>a+Math.pow(b-mean,2),0)/period, std=Math.sqrt(variance); upper.push(mean+mult*std); lower.push(mean-mult*std); }); return {upper, lower}; }
+        // --- Math & Indicator Logic ---
+        // O(n) sliding-window SMA — avoids re-summing the full period on every step.
+        function getSMAArray(prices, period = CONFIG.SMA_PERIOD) {
+            const result = new Array(prices.length).fill(null);
+            let sum = 0;
+            for (let i = 0; i < prices.length; i++) {
+                sum += prices[i];
+                if (i >= period) sum -= prices[i - period];
+                if (i >= period - 1) result[i] = sum / period;
+            }
+            return result;
+        }
+
+        // O(n) EMA — already O(n), unchanged.
+        function getEMAArray(prices, period) {
+            const k = 2 / (period + 1);
+            let prev = prices[0];
+            return prices.map((p, i) => {
+                if (i === 0) { prev = p; return p; }
+                prev = (p - prev) * k + prev;
+                return prev;
+            });
+        }
+
+        // O(n) sliding-window Bollinger Bands using Welford's online variance.
+        function getBBArray(prices, period = CONFIG.BB_PERIOD, mult = CONFIG.BB_MULT) {
+            const upper = new Array(prices.length).fill(null);
+            const lower = new Array(prices.length).fill(null);
+            let sum = 0, sumSq = 0;
+            for (let i = 0; i < prices.length; i++) {
+                sum   += prices[i];
+                sumSq += prices[i] * prices[i];
+                if (i >= period) {
+                    sum   -= prices[i - period];
+                    sumSq -= prices[i - period] * prices[i - period];
+                }
+                if (i >= period - 1) {
+                    const mean = sum / period;
+                    const variance = sumSq / period - mean * mean;
+                    const std = Math.sqrt(Math.max(0, variance));
+                    upper[i] = mean + mult * std;
+                    lower[i] = mean - mult * std;
+                }
+            }
+            return { upper, lower };
+        }
         function getRSIArray(prices, period = CONFIG.RSI_PERIOD) { let rsi=[], gains=0, losses=0; for(let i=0; i<prices.length; i++) { if(i<period){rsi.push(null);continue;} if(i===period){for(let j=1;j<=period;j++){let d=prices[j]-prices[j-1]; if(d>0)gains+=d; else losses-=d;} }else{let d=prices[i]-prices[i-1]; gains=((gains*(period-1))+(d>0?d:0))/period; losses=((losses*(period-1))+(d<0?-d:0))/period; } let rs=losses===0?100:gains/losses; rsi.push(100-(100/(1+rs))); } return rsi; }
         function getMACDArray(prices, fast = CONFIG.MACD_FAST, slow = CONFIG.MACD_SLOW, signalPeriod = CONFIG.MACD_SIGNAL) { let emaFast=getEMAArray(prices, fast), emaSlow=getEMAArray(prices, slow), macd=prices.map((_,i)=>i>=slow-1 ? emaFast[i]-emaSlow[i] : null); let validMacd = macd.filter(x=>x!==null); let signalValid = getEMAArray(validMacd, signalPeriod); let signal = Array(macd.length - signalValid.length).fill(null).concat(signalValid); return {macd, signal}; }
 
@@ -1057,8 +1100,19 @@ Signal line = EMA(9) of MACD line</span>
             renderUI();
         }
 
-        // --- UI Rendering ---
+        // --- Debounced renderUI ---
+        // Batches rapid successive calls (e.g. N tickers arriving concurrently)
+        // into a single DOM update on the next animation frame.
+        let _renderPending = false;
         function renderUI() {
+            if (_renderPending) return;
+            _renderPending = true;
+            requestAnimationFrame(() => {
+                _renderPending = false;
+                _doRenderUI();
+            });
+        }
+        function _doRenderUI() {
             const container = document.getElementById('watchlist');
             if (!container) return;
             if(appState.watchlist.length === 0) { container.innerHTML = '<div class="info-card">No stocks tracked. Add one above.</div>'; return; }
@@ -1087,6 +1141,13 @@ Signal line = EMA(9) of MACD line</span>
                     try { drawChart(ticker); } catch (e) { console.error(`drawChart failed for ${ticker}:`, e); }
                 }
             });
+        } // end _doRenderUI
+
+        // Targeted update: toggle one indicator button + redraw only that ticker's chart.
+        // Much cheaper than a full renderUI() when only one thing changed.
+        function updateIndicatorButton(ticker, key, active) {
+            const btn = document.querySelector(`button[onclick*="'${ticker}', 'ind', '${key}'"]`);
+            if (btn) btn.classList.toggle('active', active);
         }
 
         // Ensures per-ticker state objects exist, regardless of how the ticker entered the watchlist
@@ -1750,21 +1811,38 @@ Signal line = EMA(9) of MACD line</span>
         }
         // --- App Interactions ---
         async function toggleUI(ticker, type, key) {
-            if(type === 'panel') {
+            if (type === 'panel') {
                 let state = appState.ui[key][ticker];
                 appState.ui.charts[ticker] = appState.ui.news[ticker] = appState.ui.alerts[ticker] = false;
-                appState.ui[key][ticker] = !state; 
-                
-                if(key === 'news' && !appState.newsCache[ticker]) {
-                    renderUI(); 
+                appState.ui[key][ticker] = !state;
+
+                if (key === 'news' && !appState.newsCache[ticker]) {
+                    renderUI();
                     appState.newsCache[ticker] = await fetchNews(ticker);
                 }
+                // Panel toggle always needs full render (panel visibility changes DOM structure)
+                renderUI();
+                return;
             }
-            if(type === 'ind') appState.indicators[ticker][key] = !appState.indicators[ticker][key];
-            
-            localStorage.setItem('indicators', JSON.stringify(appState.indicators));
-            renderUI();
+
+            if (type === 'ind') {
+                const newVal = !appState.indicators[ticker][key];
+                appState.indicators[ticker][key] = newVal;
+                // Targeted: just toggle the button class and redraw this ticker's chart
+                updateIndicatorButton(ticker, key, newVal);
+                // Debounced localStorage write
+                clearTimeout(_indSaveTimer);
+                _indSaveTimer = setTimeout(() => {
+                    localStorage.setItem('indicators', JSON.stringify(appState.indicators));
+                }, 500);
+                // Redraw only this ticker's chart (not all cards)
+                if (appState.ui.charts[ticker] && appState.dataCache[ticker]) {
+                    try { drawChart(ticker); } catch(e) { console.error('drawChart failed:', e); }
+                }
+                return;
+            }
         }
+        let _indSaveTimer = null;
 
         function addStock() {
             const val = document.getElementById('tickerInput').value.toUpperCase().trim();
