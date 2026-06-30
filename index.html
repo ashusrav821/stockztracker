@@ -400,6 +400,29 @@
         }
         .zoom-btn:active { background: var(--hover-bg); }
 
+        /* Timeframe selector */
+        .tf-row {
+            display: flex;
+            gap: 4px;
+            margin-bottom: 8px;
+        }
+        .tf-btn {
+            padding: 4px 10px;
+            font-size: 0.75rem;
+            font-weight: 700;
+            background: var(--input-bg);
+            border: 1px solid var(--input-border);
+            color: var(--text-sub);
+            border-radius: 6px;
+            cursor: pointer;
+            letter-spacing: 0.3px;
+        }
+        .tf-btn.active {
+            background: var(--accent);
+            color: white;
+            border-color: transparent;
+        }
+
         /* Crosshair tooltip */
         .crosshair-tooltip {
             font-size: 0.74rem;
@@ -779,7 +802,7 @@ Signal line = EMA(9) of MACD line</span>
         const CONFIG = {
             WORKER_BASE: 'https://stock-tracker-api.oletyashrith.workers.dev',
             REFRESH_MS: 60000,
-            CHART_WINDOW_DAYS: 252, // ~1 trading year
+            CHART_WINDOW_DAYS: 252,
             SMA_PERIOD: 50,
             RSI_PERIOD: 14,
             BB_PERIOD: 20,
@@ -787,18 +810,27 @@ Signal line = EMA(9) of MACD line</span>
             MACD_FAST: 12,
             MACD_SLOW: 26,
             MACD_SIGNAL: 9,
+            // Timeframe definitions: interval + range passed to Yahoo via worker
+            TIMEFRAMES: {
+                '1H': { interval: '1h',  range: '5d',  windowDays: 300 },
+                '1D': { interval: '1d',  range: '1y',  windowDays: 252 },
+                '1W': { interval: '1wk', range: '5y',  windowDays: 260 },
+                '1M': { interval: '1mo', range: 'max', windowDays: 240 },
+            },
+            DEFAULT_TF: '1D',
         };
 
         // --- State Management Engine ---
         let appState = {
             watchlist: JSON.parse(localStorage.getItem('stocks')) || ['AAPL', 'TSLA', 'MSFT'],
-            alerts: JSON.parse(localStorage.getItem('alerts')) || {}, 
+            alerts: JSON.parse(localStorage.getItem('alerts')) || {},
             indicators: JSON.parse(localStorage.getItem('indicators')) || {},
             ui: { charts: {}, news: {}, alerts: {} },
-            dataCache: {},
+            dataCache: {},        // keyed by "TICKER:TF" e.g. "AAPL:1D"
             newsCache: {},
             errors: {},
-            pin: localStorage.getItem('syncPin') || ''
+            pin: localStorage.getItem('syncPin') || '',
+            timeframe: {},        // per-ticker active timeframe key, e.g. { AAPL: '1D' }
         };
 
         window.myCharts = {};
@@ -996,9 +1028,20 @@ Signal line = EMA(9) of MACD line</span>
             return set;
         }
 
+        // Returns the cache key for a ticker+timeframe combination
+        function getTfKey(ticker, tf) { return ticker + ':' + (tf || CONFIG.DEFAULT_TF); }
+
+        // Gets the active timeframe for a ticker
+        function getActiveTf(ticker) { return appState.timeframe[ticker] || CONFIG.DEFAULT_TF; }
+
+        // Gets data for a ticker's current active timeframe
+        function getTickerData(ticker) { return appState.dataCache[getTfKey(ticker, getActiveTf(ticker))]; }
+
         // --- API Data Fetching (via Cloudflare Worker proxy) ---
-        async function fetchStockData(ticker) {
-            const res = await fetch(`${CONFIG.WORKER_BASE}/api/chart?ticker=${encodeURIComponent(ticker)}&range=1y&interval=1d`);
+        async function fetchStockData(ticker, tf) {
+            tf = tf || CONFIG.DEFAULT_TF;
+            const { interval, range } = CONFIG.TIMEFRAMES[tf] || CONFIG.TIMEFRAMES[CONFIG.DEFAULT_TF];
+            const res = await fetch(`${CONFIG.WORKER_BASE}/api/chart?ticker=${encodeURIComponent(ticker)}&range=${range}&interval=${interval}`);
             if (!res.ok) {
                 let msg = `HTTP ${res.status}`;
                 try { const j = await res.json(); if(j.error) msg = j.error; } catch(e) {}
@@ -1006,7 +1049,7 @@ Signal line = EMA(9) of MACD line</span>
             }
             const data = await res.json();
             if (!data.prices || !data.prices.length) throw new Error('No price data returned');
-            return { prices: data.prices, dates: data.dates, ohlc: data.ohlc || [] };
+            return { prices: data.prices, dates: data.dates, ohlc: data.ohlc || [], tf };
         }
 
         async function fetchNews(ticker) {
@@ -1101,24 +1144,57 @@ Signal line = EMA(9) of MACD line</span>
         async function updateData() {
             await Promise.all(appState.watchlist.map(async ticker => {
                 ensureTickerState(ticker);
+                const tf = getActiveTf(ticker);
+                const key = getTfKey(ticker, tf);
 
                 try {
-                    const data = await fetchStockData(ticker);
+                    const data = await fetchStockData(ticker, tf);
                     if (!Array.isArray(data.prices) || !data.prices.length) {
                         throw new Error('No price data returned');
                     }
                     data.computed = computeIndicatorSet(data.prices, data.ohlc);
-                    appState.dataCache[ticker] = data;
+                    appState.dataCache[key] = data;
                     delete appState.errors[ticker];
                 } catch(e) {
                     appState.errors[ticker] = e.message || 'Failed to load';
-                    delete appState.dataCache[ticker]; // Guardrail: don't render stale/partial data after a failed refresh
+                    delete appState.dataCache[key];
                 }
 
                 try { evaluateAlerts(ticker); } catch(e) { console.error(`evaluateAlerts failed for ${ticker}:`, e); }
-                renderUI(); // Render each card as soon as its data arrives
+                renderUI();
             }));
             localStorage.setItem('indicators', JSON.stringify(appState.indicators));
+        }
+
+        // Switch timeframe for a specific ticker — fetches if not cached, otherwise instant
+        async function switchTimeframe(ticker, tf) {
+            if (!CONFIG.TIMEFRAMES[tf]) return;
+            appState.timeframe[ticker] = tf;
+            const key = getTfKey(ticker, tf);
+
+            // Update button states immediately
+            Object.keys(CONFIG.TIMEFRAMES).forEach(t => {
+                const btn = document.getElementById(`tf-${ticker}-${t}`);
+                if (btn) btn.classList.toggle('active', t === tf);
+            });
+
+            // If already cached for this timeframe, just redraw
+            if (appState.dataCache[key]) {
+                try { drawChart(ticker); } catch(e) { console.error(e); }
+                return;
+            }
+
+            // Not cached — fetch, then redraw
+            const key2 = getTfKey(ticker, tf);
+            try {
+                const data = await fetchStockData(ticker, tf);
+                data.computed = computeIndicatorSet(data.prices, data.ohlc);
+                appState.dataCache[key2] = data;
+                delete appState.errors[ticker];
+            } catch(e) {
+                appState.errors[ticker] = e.message || 'Failed to load';
+            }
+            renderUI();
         }
 
         function buildSignalInnerHTML(comp) {
@@ -1139,7 +1215,7 @@ Signal line = EMA(9) of MACD line</span>
         }
 
         function evaluateAlerts(ticker) {
-            const data = appState.dataCache[ticker];
+            const data = getTickerData(ticker);
             if(!data || !appState.alerts[ticker] || !appState.alerts[ticker].length) return;
             if (!Array.isArray(data.prices) || !data.prices.length || !data.computed) return;
 
@@ -1225,7 +1301,7 @@ Signal line = EMA(9) of MACD line</span>
 
             container.innerHTML = html;
             appState.watchlist.forEach(ticker => {
-                if (appState.ui.charts[ticker] && appState.dataCache[ticker]) {
+                if (appState.ui.charts[ticker] && getTickerData(ticker)) {
                     try { drawChart(ticker); } catch (e) { console.error(`drawChart failed for ${ticker}:`, e); }
                 }
             });
@@ -1250,7 +1326,7 @@ Signal line = EMA(9) of MACD line</span>
 
         function renderStockCard(ticker) {
             ensureTickerState(ticker);
-            const data = appState.dataCache[ticker];
+            const data = getTickerData(ticker);
 
             if(!data) {
                 if(appState.errors[ticker]) {
@@ -1342,6 +1418,10 @@ Signal line = EMA(9) of MACD line</span>
 
                     <!-- Panel: CHART -->
                     <div class="panel chart-container ${ui.charts[ticker] ? 'active' : ''}">
+                        <div class="tf-row">
+                            ${Object.keys(CONFIG.TIMEFRAMES).map(tf => `
+                            <button id="tf-${ticker}-${tf}" class="tf-btn ${getActiveTf(ticker)===tf?'active':''}" onclick="switchTimeframe('${ticker}','${tf}')">${tf}</button>`).join('')}
+                        </div>
                         <div class="indicator-toggles">
                             <button class="ind-btn ${inds.volume?'active':''}" onclick="toggleUI('${ticker}', 'ind', 'volume')">Vol</button>
                             <button class="ind-btn ${inds.sma?'active':''}" onclick="toggleUI('${ticker}', 'ind', 'sma')">SMA50</button>
@@ -1465,7 +1545,7 @@ Signal line = EMA(9) of MACD line</span>
         // Single pure-canvas renderer. No Chart.js for the chart itself.
         // Layout: [price+overlays pane] + [oscillator pane if RSI/MACD active]
         function drawChart(ticker) {
-            const data = appState.dataCache[ticker];
+            const data = getTickerData(ticker);
             if (!data || !Array.isArray(data.prices) || !data.prices.length || !data.computed) return;
 
             const canvas = document.getElementById('canvas-' + ticker);
@@ -1927,7 +2007,7 @@ Signal line = EMA(9) of MACD line</span>
                     localStorage.setItem('indicators', JSON.stringify(appState.indicators));
                 }, 500);
                 // Redraw only this ticker's chart (not all cards)
-                if (appState.ui.charts[ticker] && appState.dataCache[ticker]) {
+                if (appState.ui.charts[ticker] && getTickerData(ticker)) {
                     try { drawChart(ticker); } catch(e) { console.error('drawChart failed:', e); }
                 }
                 return;
@@ -1972,8 +2052,12 @@ Signal line = EMA(9) of MACD line</span>
 
         function deleteStock(ticker) {
             appState.watchlist = appState.watchlist.filter(t => t !== ticker);
-            delete appState.dataCache[ticker];
+            // Delete all cached timeframes for this ticker
+            Object.keys(CONFIG.TIMEFRAMES).forEach(tf => {
+                delete appState.dataCache[getTfKey(ticker, tf)];
+            });
             delete appState.errors[ticker];
+            delete appState.timeframe[ticker];
             persistWatchlist();
             renderUI();
         }
@@ -1983,17 +2067,19 @@ Signal line = EMA(9) of MACD line</span>
             delete appState.errors[ticker];
             renderUI();
             (async () => {
+                const tf = getActiveTf(ticker);
+                const key = getTfKey(ticker, tf);
                 try {
-                    const data = await fetchStockData(ticker);
+                    const data = await fetchStockData(ticker, tf);
                     if (!Array.isArray(data.prices) || !data.prices.length) {
                         throw new Error('No price data returned');
                     }
                     data.computed = computeIndicatorSet(data.prices, data.ohlc);
-                    appState.dataCache[ticker] = data;
+                    appState.dataCache[key] = data;
                     delete appState.errors[ticker];
                 } catch(e) {
                     appState.errors[ticker] = e.message || 'Failed to load';
-                    delete appState.dataCache[ticker];
+                    delete appState.dataCache[key];
                 }
                 renderUI();
             })();
