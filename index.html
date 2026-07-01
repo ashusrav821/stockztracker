@@ -270,12 +270,19 @@
         }
         .company-meta { font-size: 0.68rem; color: var(--text-sub); }
 
+        .price-block { display: flex; flex-direction: column; align-items: flex-end; gap: 1px; }
         .price {
             font-size: 1.15rem;
             font-weight: 800;
             margin: 0;
             letter-spacing: -0.4px;
             line-height: 1;
+        }
+        .price-change {
+            font-size: 0.7rem;
+            font-weight: 700;
+            line-height: 1;
+            letter-spacing: -0.2px;
         }
 
         /* Badge */
@@ -1359,6 +1366,17 @@ Signal line = EMA(9) of MACD line</span>
             const prevPrice = prices.length > 1 ? prices[prices.length-2] : currentPrice;
             const isBullish = currentPrice >= prevPrice;
 
+            // Day change: use last candle's open vs close if OHLC available (accurate)
+            // otherwise fall back to prev close vs current close
+            const ohlcArr = data.ohlc || [];
+            const lastCandle = ohlcArr.length ? ohlcArr[ohlcArr.length-1] : null;
+            const changeBase = (lastCandle && lastCandle.o !== null) ? lastCandle.o : prevPrice;
+            const changeAbs = currentPrice - changeBase;
+            const changePct = changeBase !== 0 ? (changeAbs / changeBase) * 100 : 0;
+            const changeSign = changeAbs >= 0 ? '+' : '';
+            const changeColor = changeAbs >= 0 ? 'var(--buy-color)' : 'var(--sell-color)';
+            const changeLabel = `${changeSign}${changeAbs.toFixed(2)} (${changeSign}${changePct.toFixed(2)}%)`;
+
             const computed = data.computed;
             const rsiArr = computed.rsi || [];
             const smaArr = computed.sma || [];
@@ -1405,7 +1423,10 @@ Signal line = EMA(9) of MACD line</span>
                                 <span class="company-meta">RSI ${rsi} · SMA $${sma}</span>
                             </div>
                             <div class="card-right">
-                                <h2 class="price" style="color:${isBullish ? 'var(--buy-color)' : 'var(--sell-color)'}">$${currentPrice.toFixed(2)}</h2>
+                                <div class="price-block">
+                                    <h2 class="price" style="color:${changeColor}">$${currentPrice.toFixed(2)}</h2>
+                                    <span class="price-change" style="color:${changeColor}">${changeLabel}</span>
+                                </div>
                                 <span class="badge ${sigClass}">${comp.signal}</span>
                             </div>
                         </div>
