@@ -61,6 +61,8 @@
 
         * { box-sizing: border-box; outline: none; -webkit-tap-highlight-color: transparent; }
 
+        html, body { overflow-x: hidden; max-width: 100vw; }
+
         body {
             margin: 0;
             font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, sans-serif;
@@ -87,23 +89,22 @@
             justify-content: space-between;
             align-items: center;
             margin-bottom: 10px;
-            gap: 10px;
+            gap: 8px;
+            min-width: 0;
         }
 
-        h1 {
-            margin: 0;
-            font-size: 1.2rem;
-            font-weight: 800;
-            letter-spacing: -0.4px;
-            color: var(--text-main);
-            white-space: nowrap;
+        .brand-mark {
+            width: 32px;
+            height: 32px;
+            border-radius: 9px;
             flex-shrink: 0;
+            display: block;
         }
 
-        .header-actions { display: flex; align-items: center; gap: 6px; flex: 1; justify-content: flex-end; }
+        .header-actions { display: flex; align-items: center; gap: 6px; flex: 1; justify-content: flex-end; min-width: 0; }
 
         /* Inline search (compact, right side of header) */
-        .search-inline { display: flex; gap: 0; flex: 1; max-width: 200px; }
+        .search-inline { display: flex; gap: 0; flex: 1; max-width: 240px; min-width: 60px; }
         .search-inline input {
             flex: 1;
             padding: 8px 10px;
@@ -128,6 +129,7 @@
             border: none;
             border-radius: 0 10px 10px 0;
             cursor: pointer;
+            flex-shrink: 0;
         }
 
         /* Icon pill buttons */
@@ -136,10 +138,22 @@
             border: 1px solid var(--input-border);
             border-radius: 10px;
             font-size: 1rem;
+            color: var(--text-main);
             cursor: pointer;
             padding: 6px 9px;
             line-height: 1;
             flex-shrink: 0;
+            min-width: 44px;
+            min-height: 44px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        /* Very narrow phones (<=380px): trim further so nothing ever has to fight for space */
+        @media (max-width: 380px) {
+            .search-inline { max-width: 170px; }
+            .icon-pill { padding: 6px 7px; min-width: 40px; min-height: 40px; }
         }
 
         /* Sync drawer */
@@ -172,20 +186,57 @@
         .sync-status.ok { color: var(--buy-color); }
 
         /* Tabs */
-        .tab-row { display: flex; gap: 0; margin-top: 2px; }
-        .tab-btn {
+        /* Bottom nav (replaces old top tab-row — puts navigation in thumb reach) */
+        .bottom-nav {
+            position: fixed;
+            left: 0; right: 0; bottom: 0;
+            display: flex;
+            background: var(--header-bg);
+            border-top: 1px solid var(--divider);
+            padding-bottom: env(safe-area-inset-bottom, 0px);
+            z-index: 100;
+        }
+        .bottom-nav-btn {
             flex: 1;
-            padding: 10px 0 8px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 2px;
             background: none;
             border: none;
-            border-bottom: 2px solid transparent;
+            padding: 7px 4px 6px;
+            min-height: 54px;
             color: var(--text-sub);
-            font-size: 0.82rem;
-            font-weight: 600;
             cursor: pointer;
-            transition: color 0.2s;
+            transition: color 0.15s;
         }
-        .tab-btn.active { color: var(--accent); border-bottom-color: var(--accent); }
+        .bottom-nav-icon { font-size: 1.28rem; line-height: 1; }
+        .bottom-nav-label { font-size: 0.66rem; font-weight: 700; letter-spacing: 0.2px; }
+        .bottom-nav-btn.active { color: var(--accent); }
+        .bottom-nav-btn:active { background: var(--hover-bg); }
+
+        /* Pull-to-refresh indicator — one shared element, JS positions it just below the header */
+        .pull-refresh-indicator {
+            position: fixed;
+            left: 0; right: 0;
+            height: 40px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+            opacity: 0;
+            pointer-events: none;
+            color: var(--text-sub);
+            font-size: 0.78rem;
+            font-weight: 700;
+            z-index: 95;
+            transform: translateY(-40px);
+        }
+        .pull-refresh-spinner { display: inline-block; font-size: 1rem; transition: transform 0.15s; }
+        .pull-refresh-indicator.ready .pull-refresh-spinner { transform: rotate(180deg); }
+        .pull-refresh-indicator.refreshing .pull-refresh-spinner { animation: prSpin 0.7s linear infinite; }
+        @keyframes prSpin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
 
         /* Filter bar */
         .filter-bar {
@@ -230,7 +281,13 @@
         }
 
         /* ---- MAIN ---- */
-        main { flex: 1; overflow-y: auto; padding: 10px 12px; }
+        main {
+            flex: 1;
+            overflow-y: auto;
+            padding: 10px 12px calc(70px + env(safe-area-inset-bottom, 0px));
+            overscroll-behavior-y: contain; /* stop the browser's own pull-to-refresh from fighting ours */
+            position: relative;
+        }
 
         /* ---- CARD ---- */
         .stock-card {
@@ -348,6 +405,7 @@
             font-size: 0.9rem;
             cursor: pointer;
             padding: 8px 4px;
+            min-height: 44px;
             display: flex;
             align-items: center;
             justify-content: center;
@@ -632,15 +690,15 @@
 <body>
 
     <header>
-        <!-- Row 1: Title + search + controls -->
+        <!-- Row 1: Brand mark + search + controls -->
         <div class="header-top">
-            <h1>Stockz Tracker</h1>
+            <img class="brand-mark" src="./icons/icon-192.png" alt="Stockz Tracker" width="32" height="32">
             <div class="header-actions">
                 <div class="search-inline">
                     <input type="text" id="tickerInput" placeholder="Ticker…" autocomplete="off" autocorrect="off" autocapitalize="characters" spellcheck="false">
                     <button onclick="addStock()">+</button>
                 </div>
-                <button class="icon-pill" onclick="toggleSyncDrawer()" id="syncIcon" title="Cloud Sync">☁</button>
+                <button class="icon-pill" onclick="toggleSyncDrawer()" id="syncIcon" title="Cloud Sync">☁️</button>
                 <button class="icon-pill" onclick="toggleTheme()" id="themeIcon">🌙</button>
             </div>
         </div>
@@ -658,14 +716,13 @@
             </div>
             <div class="sync-status" id="pushStatus"></div>
         </div>
-
-        <!-- Tabs -->
-        <div class="tab-row">
-            <button class="tab-btn active" id="tab-portfolio" onclick="switchTab('portfolio')">Portfolio</button>
-            <button class="tab-btn" id="tab-alerts" onclick="switchTab('alerts')">Alerts</button>
-            <button class="tab-btn" id="tab-guide" onclick="switchTab('guide')">Guide</button>
-        </div>
     </header>
+
+    <!-- Pull-to-refresh indicator — JS positions it just below the header and animates it during a pull -->
+    <div class="pull-refresh-indicator" id="pullRefreshIndicator">
+        <span class="pull-refresh-spinner">↓</span>
+        <span class="pull-refresh-text">Pull to refresh</span>
+    </div>
 
     <div class="filter-bar" id="filterBar">
         <input type="text" id="filterInput" placeholder="🔍  Filter stocks…" autocomplete="off" autocorrect="off" autocapitalize="characters" spellcheck="false" oninput="filterWatchlist(this.value)">
@@ -679,6 +736,22 @@
     <main id="alertsView" style="display:none;"></main>
 
     <main id="guideView" style="display:none;"></main>
+
+    <!-- Bottom nav — moved from the top header so navigation sits in thumb reach -->
+    <nav class="bottom-nav" id="bottomNav">
+        <button class="bottom-nav-btn active" id="tab-portfolio" onclick="switchTab('portfolio')">
+            <span class="bottom-nav-icon">📊</span>
+            <span class="bottom-nav-label">Portfolio</span>
+        </button>
+        <button class="bottom-nav-btn" id="tab-alerts" onclick="switchTab('alerts')">
+            <span class="bottom-nav-icon">🔔</span>
+            <span class="bottom-nav-label">Alerts</span>
+        </button>
+        <button class="bottom-nav-btn" id="tab-guide" onclick="switchTab('guide')">
+            <span class="bottom-nav-icon">📖</span>
+            <span class="bottom-nav-label">Guide</span>
+        </button>
+    </nav>
 
     <script>
         // --- Theme Management ---
@@ -1275,6 +1348,87 @@ Signal line = EMA(9) of MACD line</span>
             });
         }
 
+        // --- Pull to Refresh ---
+        // Each <main> scrolls internally (overflow-y: auto), not the window, so the gesture
+        // has to be scoped per-container and gated on that container's own scrollTop, not
+        // window.scrollY. Applies to Portfolio and Alerts (both show live data); skipped on
+        // Guide since its content is static.
+        (function setupPullToRefresh() {
+            const indicator = document.getElementById('pullRefreshIndicator');
+            const header = document.querySelector('header');
+            if (!indicator || !header) return;
+
+            const THRESHOLD = 64;   // px pulled before release triggers a refresh
+            const MAX_PULL = 100;   // visual cap, with damping past this
+            const containers = ['watchlist', 'alertsView'].map(id => document.getElementById(id)).filter(Boolean);
+
+            let active = null;   // the container currently being pulled
+            let startY = 0;
+            let pulling = false;
+            let refreshing = false;
+
+            function resetIndicator() {
+                indicator.style.transform = 'translateY(-40px)';
+                indicator.style.opacity = '0';
+                indicator.classList.remove('ready');
+            }
+
+            async function triggerRefresh() {
+                refreshing = true;
+                indicator.classList.add('refreshing');
+                indicator.querySelector('.pull-refresh-text').textContent = 'Refreshing…';
+                indicator.style.transform = `translateY(${THRESHOLD}px)`;
+                indicator.style.opacity = '1';
+                try {
+                    await updateData();
+                    if (appState.ui.activeTab === 'alerts') await loadAlertsFromServer();
+                } catch (e) {
+                    console.error('Pull-to-refresh failed:', e);
+                } finally {
+                    setTimeout(() => {
+                        refreshing = false;
+                        indicator.classList.remove('refreshing');
+                        indicator.querySelector('.pull-refresh-text').textContent = 'Pull to refresh';
+                        resetIndicator();
+                    }, 350);
+                }
+            }
+
+            containers.forEach(container => {
+                container.addEventListener('touchstart', (e) => {
+                    if (refreshing || container.style.display === 'none' || container.scrollTop > 0) { pulling = false; return; }
+                    active = container;
+                    startY = e.touches[0].clientY;
+                    pulling = true;
+                    indicator.style.top = header.getBoundingClientRect().bottom + 'px';
+                    indicator.style.transition = 'none';
+                }, { passive: true });
+
+                container.addEventListener('touchmove', (e) => {
+                    if (!pulling || active !== container || refreshing) return;
+                    const delta = e.touches[0].clientY - startY;
+                    if (delta <= 0 || container.scrollTop > 0) { resetIndicator(); return; }
+                    const pull = Math.min(delta * 0.5, MAX_PULL);
+                    indicator.style.transform = `translateY(${pull - 40}px)`;
+                    indicator.style.opacity = Math.min(pull / THRESHOLD, 1);
+                    const ready = pull >= THRESHOLD;
+                    indicator.classList.toggle('ready', ready);
+                    indicator.querySelector('.pull-refresh-text').textContent = ready ? 'Release to refresh' : 'Pull to refresh';
+                }, { passive: true });
+
+                container.addEventListener('touchend', () => {
+                    if (!pulling || active !== container) return;
+                    pulling = false;
+                    indicator.style.transition = 'opacity 0.15s, transform 0.15s';
+                    if (indicator.classList.contains('ready') && !refreshing) {
+                        triggerRefresh();
+                    } else {
+                        resetIndicator();
+                    }
+                });
+            });
+        })();
+
         // --- Alert System Logic ---
         function requestNotificationPermission() {
             if ("Notification" in window && Notification.permission !== "granted") Notification.requestPermission();
@@ -1606,7 +1760,7 @@ Signal line = EMA(9) of MACD line</span>
                     </div>
                     <div class="sync-status" id="alertsTabStatus"></div>
                     <div style="font-size:0.7rem;color:var(--text-sub);margin-top:6px;">
-                        ${appState.pin ? '🔔 Alerts sync to your PIN and evaluate in the cloud, even when the app is closed.' : '⚠️ Set a sync PIN (☁ above) so alerts can be checked while the app is closed.'}
+                        ${appState.pin ? '🔔 Alerts sync to your PIN and evaluate in the cloud, even when the app is closed.' : '⚠️ Set a sync PIN (☁️ above) so alerts can be checked while the app is closed.'}
                     </div>
                 </div>
                 <div class="alerts-ticker-list">${rows}</div>
@@ -1848,7 +2002,7 @@ Signal line = EMA(9) of MACD line</span>
                             <button onclick="addCustomAlert('${ticker}')">Set</button>
                         </div>
                         <div style="font-size:0.7rem;color:var(--text-sub);margin-top:6px;">
-                            ${appState.pin ? '🔔 Alerts sync to your PIN and evaluate in the cloud, even when the app is closed.' : '⚠️ Set a sync PIN (☁ above) so alerts can be checked while the app is closed.'}
+                            ${appState.pin ? '🔔 Alerts sync to your PIN and evaluate in the cloud, even when the app is closed.' : '⚠️ Set a sync PIN (☁️ above) so alerts can be checked while the app is closed.'}
                         </div>
                     </div>
 
