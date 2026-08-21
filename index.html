@@ -488,6 +488,30 @@
         }
         .preset-btn:active { background: var(--accent-dim); border-color: var(--accent); }
         .alert-form { display: flex; gap: 6px; margin-top: 10px; flex-wrap: wrap; }
+
+        /* Alerts Tab (multi-select watchlist view) */
+        .alerts-tab-header {
+            background: var(--card-bg);
+            border: 1px solid var(--card-border);
+            border-radius: 14px;
+            padding: 14px;
+            margin: 12px 14px;
+        }
+        .alerts-select-row { display: flex; align-items: center; gap: 8px; }
+        .alerts-select-count { font-size: 0.78rem; color: var(--text-sub); margin-left: auto; font-weight: 600; }
+        .alerts-ticker-list { padding: 0 14px 14px; display: flex; flex-direction: column; gap: 8px; }
+        .alert-ticker-row {
+            background: var(--card-bg);
+            border: 1px solid var(--card-border);
+            border-radius: 12px;
+            padding: 10px 12px;
+        }
+        .alert-ticker-label { display: flex; align-items: center; gap: 8px; cursor: pointer; }
+        .alert-ticker-check { width: 18px; height: 18px; flex-shrink: 0; accent-color: var(--accent); }
+        .alert-ticker-name { font-weight: 800; font-size: 0.95rem; }
+        .alert-ticker-meta { font-size: 0.78rem; color: var(--text-sub); margin-left: auto; }
+        .alert-ticker-rules { margin-top: 8px; padding-left: 26px; display: flex; flex-direction: column; gap: 4px; }
+        .alert-ticker-empty { font-size: 0.76rem; color: var(--text-sub); padding-left: 26px; }
         .alert-form select, .alert-form input {
             background: var(--input-bg);
             color: var(--text-main);
@@ -635,6 +659,7 @@
         <!-- Tabs -->
         <div class="tab-row">
             <button class="tab-btn active" id="tab-portfolio" onclick="switchTab('portfolio')">Portfolio</button>
+            <button class="tab-btn" id="tab-alerts" onclick="switchTab('alerts')">Alerts</button>
             <button class="tab-btn" id="tab-guide" onclick="switchTab('guide')">Guide</button>
         </div>
     </header>
@@ -647,6 +672,8 @@
     <main id="watchlist">
         <div class="info-card">Initializing Data...</div>
     </main>
+
+    <main id="alertsView" style="display:none;"></main>
 
     <main id="guideView" style="display:none;"></main>
 
@@ -690,26 +717,29 @@
         function switchTab(tab) {
             const portfolio = document.getElementById('watchlist');
             const guide = document.getElementById('guideView');
+            const alertsTab = document.getElementById('alertsView');
             const tabPortfolio = document.getElementById('tab-portfolio');
             const tabGuide = document.getElementById('tab-guide');
+            const tabAlerts = document.getElementById('tab-alerts');
             const filterBar = document.getElementById('filterBar');
 
-            if (tab === 'guide') {
-                portfolio.style.display = 'none';
-                guide.style.display = 'block';
-                if (filterBar) filterBar.style.display = 'none';
-                tabPortfolio.classList.remove('active');
-                tabGuide.classList.add('active');
-                if (!guide.dataset.rendered) {
-                    guide.innerHTML = getGuideHTML();
-                    guide.dataset.rendered = '1';
-                }
-            } else {
-                portfolio.style.display = '';
-                guide.style.display = 'none';
-                if (filterBar) filterBar.style.display = 'flex';
-                tabGuide.classList.remove('active');
-                tabPortfolio.classList.add('active');
+            appState.ui.activeTab = tab;
+
+            portfolio.style.display = tab === 'portfolio' ? '' : 'none';
+            guide.style.display = tab === 'guide' ? 'block' : 'none';
+            alertsTab.style.display = tab === 'alerts' ? 'block' : 'none';
+            if (filterBar) filterBar.style.display = tab === 'portfolio' ? 'flex' : 'none';
+
+            tabPortfolio.classList.toggle('active', tab === 'portfolio');
+            tabGuide.classList.toggle('active', tab === 'guide');
+            tabAlerts.classList.toggle('active', tab === 'alerts');
+
+            if (tab === 'guide' && !guide.dataset.rendered) {
+                guide.innerHTML = getGuideHTML();
+                guide.dataset.rendered = '1';
+            }
+            if (tab === 'alerts') {
+                renderAlertsTab();
             }
         }
 
@@ -848,7 +878,7 @@ Signal line = EMA(9) of MACD line</span>
             watchlist: JSON.parse(localStorage.getItem('stocks')) || ['AAPL', 'TSLA', 'MSFT'],
             alerts: JSON.parse(localStorage.getItem('alerts')) || {},
             indicators: JSON.parse(localStorage.getItem('indicators')) || {},
-            ui: { charts: {}, news: {}, alerts: {} },
+            ui: { charts: {}, news: {}, alerts: {}, activeTab: 'portfolio' },
             dataCache: {},        // keyed by "TICKER:TF" e.g. "AAPL:1D"
             newsCache: {},
             errors: {},
@@ -1337,12 +1367,23 @@ Signal line = EMA(9) of MACD line</span>
             } catch (e) { /* best-effort */ }
         }
 
-        // Adds a quick-preset alert (drop %, RSI band) without going through the manual form.
-        function addPresetAlert(ticker, type, value) {
+        // Core of adding a preset/custom alert — mutates state only, no save/sync/render side
+        // effects, so callers (single-ticker or multi-select batch) control when those happen.
+        // Returns true if a new rule was added, false if an identical one already existed.
+        function _addAlertRuleSilent(ticker, type, value) {
             ensureTickerState(ticker);
             const exists = appState.alerts[ticker].some(a => a.ind === type && a.val === value);
-            if (exists) return;
-            appState.alerts[ticker].push({ id: Date.now(), ind: type, val: value, triggered: false });
+            if (exists) return false;
+            // Date.now() alone can collide when adding to several tickers in the same tick
+            // (multi-select apply); the random suffix keeps ids unique within a batch.
+            const id = Date.now() + Math.random();
+            appState.alerts[ticker].push({ id, ind: type, val: value, triggered: false });
+            return true;
+        }
+
+        // Adds a quick-preset alert (drop %, RSI band) to a single ticker, e.g. from a stock card.
+        function addPresetAlert(ticker, type, value) {
+            if (!_addAlertRuleSilent(ticker, type, value)) return;
             localStorage.setItem('alerts', JSON.stringify(appState.alerts));
             syncAlertsToServer();
             renderUI();
@@ -1410,7 +1451,7 @@ Signal line = EMA(9) of MACD line</span>
 
             if(isNaN(val)) return alert("Please enter a valid number");
 
-            appState.alerts[ticker].push({ id: Date.now(), ind, val, triggered: false });
+            if (!_addAlertRuleSilent(ticker, ind, val)) return; // identical rule already exists
             localStorage.setItem('alerts', JSON.stringify(appState.alerts));
             syncAlertsToServer();
             renderUI();
@@ -1421,6 +1462,148 @@ Signal line = EMA(9) of MACD line</span>
             localStorage.setItem('alerts', JSON.stringify(appState.alerts));
             syncAlertsToServer();
             renderUI();
+        }
+
+        // ============================================================
+        // Alerts Tab — multi-select ticker view for applying one alert
+        // to several stocks at once, and a consolidated list of every
+        // active alert across the whole watchlist in one place.
+        // ============================================================
+        const selectedAlertTickers = new Set();
+
+        function setAlertsTabStatus(msg, type) {
+            const el = document.getElementById('alertsTabStatus');
+            if (el) { el.textContent = msg; el.className = 'sync-status' + (type ? ' ' + type : ''); }
+        }
+
+        function toggleAlertTickerSelection(ticker, checked) {
+            if (checked) selectedAlertTickers.add(ticker); else selectedAlertTickers.delete(ticker);
+            const countEl = document.getElementById('alertsSelectCount');
+            if (countEl) countEl.textContent = `${selectedAlertTickers.size} selected`;
+        }
+
+        function selectAllAlertTickers(select) {
+            if (select) appState.watchlist.forEach(t => selectedAlertTickers.add(t));
+            else selectedAlertTickers.clear();
+            renderAlertsTab();
+        }
+
+        // Applies a quick preset (drop %, RSI band) to every currently checked ticker in one shot —
+        // saves/syncs/renders once at the end rather than once per ticker.
+        function addPresetAlertToSelected(type, value) {
+            if (!selectedAlertTickers.size) { setAlertsTabStatus('Select at least one stock first', 'error'); return; }
+            let added = 0;
+            selectedAlertTickers.forEach(ticker => { if (_addAlertRuleSilent(ticker, type, value)) added++; });
+            if (added) {
+                localStorage.setItem('alerts', JSON.stringify(appState.alerts));
+                syncAlertsToServer();
+            }
+            setAlertsTabStatus(added ? `Added to ${added} stock${added === 1 ? '' : 's'}` : 'Already set on all selected stocks', added ? 'ok' : '');
+            renderAlertsTab();
+            renderUI();
+        }
+
+        // Same batch-apply, but for the custom type/value form instead of a preset button.
+        function addCustomAlertToSelected() {
+            if (!selectedAlertTickers.size) { setAlertsTabStatus('Select at least one stock first', 'error'); return; }
+            const ind = document.getElementById('alertsTab-type').value;
+            const val = parseFloat(document.getElementById('alertsTab-val').value);
+            if (isNaN(val)) { setAlertsTabStatus('Enter a valid number', 'error'); return; }
+
+            requestNotificationPermission();
+            let added = 0;
+            selectedAlertTickers.forEach(ticker => { if (_addAlertRuleSilent(ticker, ind, val)) added++; });
+            if (added) {
+                localStorage.setItem('alerts', JSON.stringify(appState.alerts));
+                syncAlertsToServer();
+            }
+            setAlertsTabStatus(added ? `Added to ${added} stock${added === 1 ? '' : 's'}` : 'Already set on all selected stocks', added ? 'ok' : '');
+            renderAlertsTab();
+            renderUI();
+        }
+
+        function deleteAlertFromTab(ticker, id) {
+            deleteAlert(ticker, id); // already saves/syncs/re-renders the portfolio
+            renderAlertsTab();
+        }
+
+        function renderAlertsTab() {
+            const container = document.getElementById('alertsView');
+            if (!container) return;
+
+            if (!appState.watchlist.length) {
+                container.innerHTML = '<div class="info-card">No stocks tracked yet — add one from the Portfolio tab.</div>';
+                return;
+            }
+
+            const rows = appState.watchlist.map(ticker => {
+                ensureTickerState(ticker);
+                const data = getTickerData(ticker);
+                let meta = '—';
+                if (data && data.computed && data.prices && data.prices.length) {
+                    const price = data.prices[data.prices.length - 1];
+                    const rsiArr = data.computed.rsi || [];
+                    const rsi = rsiArr.length ? rsiArr[rsiArr.length - 1] : null;
+                    meta = `$${price.toFixed(2)}` + (rsi !== null && rsi !== undefined ? ` · RSI ${rsi.toFixed(1)}` : '');
+                }
+
+                const rules = appState.alerts[ticker] || [];
+                const rulesHtml = rules.length
+                    ? rules.map(a => `
+                        <div class="active-alert">
+                            <span>${a.triggered ? '⚠️' : '🔔'} ${ALERT_TYPE_META[a.ind] ? ALERT_TYPE_META[a.ind].label(a.val) : a.ind}</span>
+                            <button class="del-alert" onclick="deleteAlertFromTab('${ticker}', ${a.id})">✕</button>
+                        </div>`).join('')
+                    : '<div class="alert-ticker-empty">No alerts set</div>';
+
+                return `
+                    <div class="alert-ticker-row">
+                        <label class="alert-ticker-label">
+                            <input type="checkbox" class="alert-ticker-check" value="${ticker}" ${selectedAlertTickers.has(ticker) ? 'checked' : ''} onchange="toggleAlertTickerSelection('${ticker}', this.checked)">
+                            <span class="alert-ticker-name">${ticker}</span>
+                            <span class="alert-ticker-meta">${meta}</span>
+                        </label>
+                        <div class="alert-ticker-rules">${rulesHtml}</div>
+                    </div>`;
+            }).join('');
+
+            container.innerHTML = `
+                <div class="alerts-tab-header">
+                    <div class="alerts-select-row">
+                        <button class="preset-btn" onclick="selectAllAlertTickers(true)">Select All</button>
+                        <button class="preset-btn" onclick="selectAllAlertTickers(false)">Clear</button>
+                        <span class="alerts-select-count" id="alertsSelectCount">${selectedAlertTickers.size} selected</span>
+                    </div>
+                    <div style="font-size:0.72rem;color:var(--text-sub);margin:10px 0 5px;font-weight:600;text-transform:uppercase;letter-spacing:0.4px;">Apply Preset to Selected</div>
+                    <div class="alert-presets">
+                        <button class="preset-btn" onclick="addPresetAlertToSelected('price_drop_pct',5)">🔻 -5%</button>
+                        <button class="preset-btn" onclick="addPresetAlertToSelected('price_drop_pct',10)">🔻 -10%</button>
+                        <button class="preset-btn" onclick="addPresetAlertToSelected('price_drop_pct',15)">🔻 -15%</button>
+                        <button class="preset-btn" onclick="addPresetAlertToSelected('rsi_below',30)">RSI &lt; 30</button>
+                        <button class="preset-btn" onclick="addPresetAlertToSelected('rsi_above',70)">RSI &gt; 70</button>
+                    </div>
+                    <div style="font-size:0.72rem;color:var(--text-sub);margin:10px 0 5px;font-weight:600;text-transform:uppercase;letter-spacing:0.4px;">Apply Custom Alert to Selected</div>
+                    <div class="alert-form">
+                        <select id="alertsTab-type">
+                            <option value="price_drop_pct">Price drops %</option>
+                            <option value="price_rise_pct">Price rises %</option>
+                            <option value="rsi_below">RSI below</option>
+                            <option value="rsi_above">RSI above</option>
+                            <option value="price_above">Price above $</option>
+                            <option value="price_below">Price below $</option>
+                            <option value="sma_above">SMA50 above $</option>
+                            <option value="sma_below">SMA50 below $</option>
+                        </select>
+                        <input type="number" id="alertsTab-val" placeholder="Value">
+                        <button onclick="addCustomAlertToSelected()">Apply</button>
+                    </div>
+                    <div class="sync-status" id="alertsTabStatus"></div>
+                    <div style="font-size:0.7rem;color:var(--text-sub);margin-top:6px;">
+                        ${appState.pin ? '🔔 Alerts sync to your PIN and evaluate in the cloud, even when the app is closed.' : '⚠️ Set a sync PIN (☁ above) so alerts can be checked while the app is closed.'}
+                    </div>
+                </div>
+                <div class="alerts-ticker-list">${rows}</div>
+            `;
         }
 
         // --- Debounced renderUI ---
@@ -1438,7 +1621,11 @@ Signal line = EMA(9) of MACD line</span>
         function _doRenderUI() {
             const container = document.getElementById('watchlist');
             if (!container) return;
-            if(appState.watchlist.length === 0) { container.innerHTML = '<div class="info-card">No stocks tracked. Add one above.</div>'; return; }
+            if(appState.watchlist.length === 0) {
+                container.innerHTML = '<div class="info-card">No stocks tracked. Add one above.</div>';
+                if (appState.ui.activeTab === 'alerts') renderAlertsTab();
+                return;
+            }
             
             let html = '';
             for (let ticker of appState.watchlist) {
@@ -1467,6 +1654,9 @@ Signal line = EMA(9) of MACD line</span>
             // Re-apply active filter after DOM rebuild
             const filterInput = document.getElementById('filterInput');
             if (filterInput && filterInput.value) filterWatchlist(filterInput.value);
+
+            // Keep the Alerts tab's price/RSI meta and rule list current if it's the visible tab
+            if (appState.ui.activeTab === 'alerts') renderAlertsTab();
         } // end _doRenderUI
 
         // Targeted update: toggle one indicator button + redraw only that ticker's chart.
