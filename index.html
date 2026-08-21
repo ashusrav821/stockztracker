@@ -41,7 +41,7 @@
             --card-border: #e8e8f0;
             --text-main: #0f0f1a;
             --text-sub: #9090a8;
-            --text-mid: #6060788;
+            --text-mid: #606078;
             --accent: #5b54e8;
             --accent-dim: rgba(91, 84, 232, 0.08);
             --buy-color: #00b87c;
@@ -475,6 +475,18 @@
         .news-date { font-size: 0.7rem; color: var(--text-sub); }
 
         /* Alerts */
+        .alert-presets { display: flex; gap: 6px; flex-wrap: wrap; }
+        .preset-btn {
+            background: var(--input-bg);
+            color: var(--text-main);
+            border: 1px solid var(--input-border);
+            padding: 6px 10px;
+            border-radius: 20px;
+            font-size: 0.78rem;
+            font-weight: 600;
+            cursor: pointer;
+        }
+        .preset-btn:active { background: var(--accent-dim); border-color: var(--accent); }
         .alert-form { display: flex; gap: 6px; margin-top: 10px; flex-wrap: wrap; }
         .alert-form select, .alert-form input {
             background: var(--input-bg);
@@ -614,6 +626,10 @@
                 <button class="primary" onclick="saveToPin()">Save</button>
             </div>
             <div class="sync-status" id="syncStatus"></div>
+            <div class="sync-row" style="margin-top:6px;">
+                <button style="flex:1;" id="pushBtn" onclick="enablePushAlerts()">🔔 Enable Watch Alerts</button>
+            </div>
+            <div class="sync-status" id="pushStatus"></div>
         </div>
 
         <!-- Tabs -->
@@ -1102,6 +1118,7 @@ Signal line = EMA(9) of MACD line</span>
 
                 setSyncStatus('Loaded watchlist from cloud', 'ok');
                 document.getElementById('watchlist').innerHTML = '<div class="info-card">Fetching...</div>';
+                await loadAlertsFromServer();
                 await updateData();
             } catch(e) {
                 setSyncStatus('Failed to load: ' + e.message, 'error');
@@ -1216,11 +1233,139 @@ Signal line = EMA(9) of MACD line</span>
                 </ul>`;
         }
 
+        // --- Service Worker Registration ---
+        // Required both for offline caching (sw.js was previously never registered) and
+        // for Push API notifications, which only deliver to a registered SW.
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('./sw.js').catch(e => console.error('SW registration failed:', e));
+            });
+        }
+
         // --- Alert System Logic ---
         function requestNotificationPermission() {
             if ("Notification" in window && Notification.permission !== "granted") Notification.requestPermission();
         }
 
+        // --- Push Alerts (server-evaluated, reach the phone/watch even when app is closed) ---
+        function setPushStatus(msg, type) {
+            const el = document.getElementById('pushStatus');
+            if (el) { el.textContent = msg; el.className = 'sync-status' + (type ? ' ' + type : ''); }
+        }
+
+        function urlBase64ToUint8Array(base64String) {
+            const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
+            const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+            const rawData = atob(base64);
+            const outputArray = new Uint8Array(rawData.length);
+            for (let i = 0; i < rawData.length; i++) outputArray[i] = rawData.charCodeAt(i);
+            return outputArray;
+        }
+
+        async function enablePushAlerts() {
+            if (!appState.pin) {
+                setPushStatus('Set a sync PIN above first — alerts are tied to it', 'error');
+                return;
+            }
+            if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
+                setPushStatus('Push not supported on this browser', 'error');
+                return;
+            }
+
+            setPushStatus('Enabling...', '');
+            try {
+                const perm = await Notification.requestPermission();
+                if (perm !== 'granted') { setPushStatus('Notification permission denied', 'error'); return; }
+
+                const keyRes = await fetch(`${CONFIG.WORKER_BASE}/api/vapid-public-key`);
+                if (!keyRes.ok) throw new Error('Could not fetch VAPID key');
+                const { publicKey } = await keyRes.json();
+
+                const reg = await navigator.serviceWorker.ready;
+                let sub = await reg.pushManager.getSubscription();
+                if (!sub) {
+                    sub = await reg.pushManager.subscribe({
+                        userVisibleOnly: true,
+                        applicationServerKey: urlBase64ToUint8Array(publicKey),
+                    });
+                }
+
+                const res = await fetch(`${CONFIG.WORKER_BASE}/api/push-subscribe`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ pin: appState.pin, subscription: sub.toJSON() }),
+                });
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+                setPushStatus('Watch alerts enabled on this device ✓', 'ok');
+                document.getElementById('pushBtn').textContent = '🔔 Watch Alerts Enabled';
+            } catch (e) {
+                setPushStatus('Failed: ' + e.message, 'error');
+            }
+        }
+
+        // Flattens appState.alerts ({ticker: [rules]}) into a single array with ticker attached,
+        // and pushes it to the worker so the Cron Trigger can evaluate rules independent of the app.
+        function syncAlertsToServer() {
+            if (!appState.pin) return; // server-side evaluation requires a PIN to key off of
+            const flat = Object.entries(appState.alerts).flatMap(([ticker, rules]) =>
+                rules.map(r => ({ id: r.id, ticker, type: r.type, value: r.value }))
+            );
+            fetch(`${CONFIG.WORKER_BASE}/api/alerts`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ pin: appState.pin, rules: flat }),
+            }).catch(() => {}); // best-effort; local copy remains the source of truth for the UI
+        }
+
+        // Pulls server-side rules (which carry armed/lastTriggered state maintained by the cron
+        // evaluator) back into appState.alerts, keyed by ticker, on load / after PIN sync.
+        async function loadAlertsFromServer() {
+            if (!appState.pin) return;
+            try {
+                const res = await fetch(`${CONFIG.WORKER_BASE}/api/alerts?pin=${encodeURIComponent(appState.pin)}`);
+                if (!res.ok) return;
+                const data = await res.json();
+                if (!Array.isArray(data.rules)) return;
+                const byTicker = {};
+                data.rules.forEach(r => {
+                    if (!byTicker[r.ticker]) byTicker[r.ticker] = [];
+                    byTicker[r.ticker].push({ id: r.id, ind: r.type, val: r.value, triggered: !r.armed });
+                });
+                appState.alerts = byTicker;
+                localStorage.setItem('alerts', JSON.stringify(appState.alerts));
+            } catch (e) { /* best-effort */ }
+        }
+
+        // Adds a quick-preset alert (drop %, RSI band) without going through the manual form.
+        function addPresetAlert(ticker, type, value) {
+            ensureTickerState(ticker);
+            const exists = appState.alerts[ticker].some(a => a.ind === type && a.val === value);
+            if (exists) return;
+            appState.alerts[ticker].push({ id: Date.now(), ind: type, val: value, triggered: false });
+            localStorage.setItem('alerts', JSON.stringify(appState.alerts));
+            syncAlertsToServer();
+            renderUI();
+        }
+
+        // Alert type metadata — single source of truth for label text + hit test, shared by the
+        // manual form, quick-preset buttons, and the foreground evaluator. Mirrors the type
+        // strings the worker's Cron Trigger understands (see ALERT_TYPES in worker.js) so alerts
+        // created here evaluate identically server-side even when the app is closed.
+        const ALERT_TYPE_META = {
+            price_drop_pct: { label: v => `Drop ${v}%`,     metric: 'changePct', hit: (v, c) => c !== null && c <= -v },
+            price_rise_pct: { label: v => `Rise ${v}%`,     metric: 'changePct', hit: (v, c) => c !== null && c >= v },
+            rsi_below:      { label: v => `RSI < ${v}`,     metric: 'rsi',       hit: (v, c) => c !== null && c < v },
+            rsi_above:      { label: v => `RSI > ${v}`,     metric: 'rsi',       hit: (v, c) => c !== null && c > v },
+            price_above:    { label: v => `Price > $${v}`,  metric: 'price',     hit: (v, c) => c !== null && c > v },
+            price_below:    { label: v => `Price < $${v}`,  metric: 'price',     hit: (v, c) => c !== null && c < v },
+            sma_above:      { label: v => `SMA50 > $${v}`,  metric: 'sma',       hit: (v, c) => c !== null && c > v },
+            sma_below:      { label: v => `SMA50 < $${v}`,  metric: 'sma',       hit: (v, c) => c !== null && c < v },
+        };
+
+        // Foreground quick-check: fires a browser Notification immediately if the app happens to
+        // be open when a threshold is crossed. The authoritative, always-on evaluation (including
+        // while the app/phone is closed) runs server-side via the Cron Trigger — see syncAlertsToServer.
         function evaluateAlerts(ticker) {
             const data = getTickerData(ticker);
             if(!data || !appState.alerts[ticker] || !appState.alerts[ticker].length) return;
@@ -1228,46 +1373,53 @@ Signal line = EMA(9) of MACD line</span>
 
             const prices = data.prices;
             const currentPrice = prices[prices.length-1];
+            const prevClose = prices.length > 1 ? prices[prices.length-2] : null;
+            const changePct = prevClose ? ((currentPrice - prevClose) / prevClose) * 100 : null;
             const rsiArr = data.computed.rsi || [];
             const smaArr = data.computed.sma || [];
             const rsi = rsiArr.length ? rsiArr[rsiArr.length-1] : null;
             const sma = smaArr.length ? smaArr[smaArr.length-1] : null;
+            const ctx = { price: currentPrice, rsi, sma, changePct };
 
             let stateChanged = false;
 
             appState.alerts[ticker].forEach(al => {
                 if(al.triggered) return;
-                let valToCheck = al.ind === 'Price' ? currentPrice : (al.ind === 'RSI' ? rsi : sma);
-                let hit = (al.cond === '>' && valToCheck > al.val) || (al.cond === '<' && valToCheck < al.val);
-                
-                if (hit) {
+                const meta = ALERT_TYPE_META[al.ind];
+                if (!meta) return;
+                const current = ctx[meta.metric];
+                if (meta.hit(al.val, current)) {
                     if ("Notification" in window && Notification.permission === "granted") {
-                        new Notification(`📈 Alert Triggered: ${ticker}`, { body: `${al.ind} is ${al.cond} ${al.val} (Currently: ${valToCheck.toFixed(2)})` });
+                        new Notification(`📈 Alert Triggered: ${ticker}`, { body: `${meta.label(al.val)} (currently ${current !== null ? current.toFixed(2) : '—'})` });
                     }
-                    al.triggered = true; 
+                    al.triggered = true;
                     stateChanged = true;
                 }
             });
 
-            if(stateChanged) localStorage.setItem('alerts', JSON.stringify(appState.alerts));
+            if(stateChanged) {
+                localStorage.setItem('alerts', JSON.stringify(appState.alerts));
+                syncAlertsToServer();
+            }
         }
 
         function addCustomAlert(ticker) {
             requestNotificationPermission();
-            const ind = document.getElementById(`alt-ind-${ticker}`).value;
-            const cond = document.getElementById(`alt-cond-${ticker}`).value;
+            const ind = document.getElementById(`alt-type-${ticker}`).value;
             const val = parseFloat(document.getElementById(`alt-val-${ticker}`).value);
-            
+
             if(isNaN(val)) return alert("Please enter a valid number");
 
-            appState.alerts[ticker].push({ id: Date.now(), ind, cond, val, triggered: false });
+            appState.alerts[ticker].push({ id: Date.now(), ind, val, triggered: false });
             localStorage.setItem('alerts', JSON.stringify(appState.alerts));
+            syncAlertsToServer();
             renderUI();
         }
 
         function deleteAlert(ticker, id) {
             appState.alerts[ticker] = appState.alerts[ticker].filter(a => a.id !== id);
             localStorage.setItem('alerts', JSON.stringify(appState.alerts));
+            syncAlertsToServer();
             renderUI();
         }
 
@@ -1393,7 +1545,7 @@ Signal line = EMA(9) of MACD line</span>
 
             let alertsHtml = (appState.alerts[ticker] || []).map(a => `
                 <div class="active-alert">
-                    <span>${a.triggered ? '⚠️' : '🔔'} ${a.ind} ${a.cond} ${a.val}</span>
+                    <span>${a.triggered ? '⚠️' : '🔔'} ${ALERT_TYPE_META[a.ind] ? ALERT_TYPE_META[a.ind].label(a.val) : (a.ind + ' ' + (a.cond||'') + ' ' + a.val)}</span>
                     <button class="del-alert" onclick="deleteAlert('${ticker}', ${a.id})">✕</button>
                 </div>
             `).join('');
@@ -1475,12 +1627,31 @@ Signal line = EMA(9) of MACD line</span>
                     <!-- Panel: ALERTS -->
                     <div class="panel ${ui.alerts[ticker] ? 'active' : ''}">
                         <div style="margin-bottom:8px;">${alertsHtml}</div>
-                        <div style="font-size:0.72rem;color:var(--text-sub);margin-bottom:5px;font-weight:600;text-transform:uppercase;letter-spacing:0.4px;">New Alert</div>
+                        <div style="font-size:0.72rem;color:var(--text-sub);margin-bottom:5px;font-weight:600;text-transform:uppercase;letter-spacing:0.4px;">Quick Add</div>
+                        <div class="alert-presets">
+                            <button class="preset-btn" onclick="addPresetAlert('${ticker}','price_drop_pct',5)">🔻 -5%</button>
+                            <button class="preset-btn" onclick="addPresetAlert('${ticker}','price_drop_pct',10)">🔻 -10%</button>
+                            <button class="preset-btn" onclick="addPresetAlert('${ticker}','price_drop_pct',15)">🔻 -15%</button>
+                            <button class="preset-btn" onclick="addPresetAlert('${ticker}','rsi_below',30)">RSI &lt; 30</button>
+                            <button class="preset-btn" onclick="addPresetAlert('${ticker}','rsi_above',70)">RSI &gt; 70</button>
+                        </div>
+                        <div style="font-size:0.72rem;color:var(--text-sub);margin:8px 0 5px;font-weight:600;text-transform:uppercase;letter-spacing:0.4px;">Custom Alert</div>
                         <div class="alert-form">
-                            <select id="alt-ind-${ticker}"><option value="Price">Price</option><option value="RSI">RSI</option><option value="SMA">SMA 50</option></select>
-                            <select id="alt-cond-${ticker}"><option value=">">Above</option><option value="<">Below</option></select>
+                            <select id="alt-type-${ticker}">
+                                <option value="price_drop_pct">Price drops %</option>
+                                <option value="price_rise_pct">Price rises %</option>
+                                <option value="rsi_below">RSI below</option>
+                                <option value="rsi_above">RSI above</option>
+                                <option value="price_above">Price above $</option>
+                                <option value="price_below">Price below $</option>
+                                <option value="sma_above">SMA50 above $</option>
+                                <option value="sma_below">SMA50 below $</option>
+                            </select>
                             <input type="number" id="alt-val-${ticker}" placeholder="Value">
                             <button onclick="addCustomAlert('${ticker}')">Set</button>
+                        </div>
+                        <div style="font-size:0.7rem;color:var(--text-sub);margin-top:6px;">
+                            ${appState.pin ? '🔔 Alerts sync to your PIN and evaluate in the cloud, even when the app is closed.' : '⚠️ Set a sync PIN (☁ above) so alerts can be checked while the app is closed.'}
                         </div>
                     </div>
 
@@ -2126,8 +2297,19 @@ Signal line = EMA(9) of MACD line</span>
         document.getElementById('tickerInput').addEventListener('keydown', (e) => {
             if (e.key === 'Enter') addStock();
         });
+        if (appState.pin) loadAlertsFromServer().then(renderUI);
         updateData();
         setInterval(updateData, CONFIG.REFRESH_MS);
+
+        // Reflect existing push subscription state in the button, if already enabled on this device
+        if ('serviceWorker' in navigator && 'PushManager' in window) {
+            navigator.serviceWorker.ready.then(reg => reg.pushManager.getSubscription()).then(sub => {
+                if (sub) {
+                    const btn = document.getElementById('pushBtn');
+                    if (btn) btn.textContent = '🔔 Watch Alerts Enabled';
+                }
+            }).catch(() => {});
+        }
     </script>
 </body>
 </html>
