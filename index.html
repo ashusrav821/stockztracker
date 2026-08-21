@@ -5,6 +5,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Stock Pro Tracker</title>
     <meta name="theme-color" id="theme-meta" content="#000000">
+    <link rel="manifest" href="./manifest.json">
+    <link rel="icon" type="image/png" sizes="192x192" href="./icons/icon-192.png">
+    <link rel="apple-touch-icon" href="./icons/icon-192.png">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
         /* --- Dark Theme --- */
@@ -1308,7 +1311,11 @@ Signal line = EMA(9) of MACD line</span>
                 if (perm !== 'granted') { setPushStatus('Notification permission denied', 'error'); return; }
 
                 const keyRes = await fetch(`${CONFIG.WORKER_BASE}/api/vapid-public-key`);
-                if (!keyRes.ok) throw new Error('Could not fetch VAPID key');
+                if (!keyRes.ok) {
+                    let detail = `HTTP ${keyRes.status}`;
+                    try { const j = await keyRes.json(); if (j.error) detail = j.error; } catch(e) {}
+                    throw new Error(`VAPID key fetch failed (${detail})`);
+                }
                 const { publicKey } = await keyRes.json();
 
                 const reg = await navigator.serviceWorker.ready;
