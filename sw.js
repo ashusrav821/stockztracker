@@ -1,7 +1,11 @@
-const CACHE_NAME = 'stock-tracker-v3';
+const CACHE_NAME = 'stock-tracker-v4';
 const urlsToCache = [
   './index.html',
   './manifest.json',
+  './icons/icon-192.png',
+  './icons/icon-512.png',
+  './icons/icon-192-maskable.png',
+  './icons/icon-512-maskable.png',
   'https://cdn.jsdelivr.net/npm/chart.js'
 ];
 
