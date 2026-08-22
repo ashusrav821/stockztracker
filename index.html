@@ -99,7 +99,10 @@
             border-radius: 9px;
             flex-shrink: 0;
             display: block;
+            cursor: pointer;
+            transition: transform 0.1s;
         }
+        .brand-mark:active { transform: scale(0.9); }
 
         .header-actions { display: flex; align-items: center; gap: 6px; flex: 1; justify-content: flex-end; min-width: 0; }
 
@@ -767,7 +770,7 @@
     <header>
         <!-- Row 1: Brand mark + search + controls -->
         <div class="header-top">
-            <img class="brand-mark" src="./icons/icon-192.png" alt="Stockz Tracker" width="32" height="32">
+            <img class="brand-mark" src="./icons/icon-192.png" alt="Stockz Tracker" title="Home" width="32" height="32" onclick="goHome()">
             <div class="header-actions">
                 <div class="search-inline">
                     <input type="text" id="tickerInput" placeholder="Ticker…" autocomplete="off" autocorrect="off" autocapitalize="characters" spellcheck="false">
@@ -898,6 +901,15 @@
         }
 
         // --- Tab Switching ---
+        // Tapping the header brand mark acts like a "home" button: back to Portfolio,
+        // any active filter cleared, scrolled to the top of the list.
+        function goHome() {
+            switchTab('portfolio');
+            clearFilter();
+            const list = document.getElementById('watchlist');
+            if (list) list.scrollTo({ top: 0, behavior: 'smooth' });
+        }
+
         function switchTab(tab) {
             const portfolio = document.getElementById('watchlist');
             const guide = document.getElementById('guideView');
