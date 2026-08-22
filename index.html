@@ -107,7 +107,7 @@
         .header-actions { display: flex; align-items: center; gap: 6px; flex: 1; justify-content: flex-end; min-width: 0; }
 
         /* Inline search (compact, right side of header) */
-        .search-inline { display: flex; gap: 0; flex: 1; max-width: 240px; min-width: 60px; }
+        .search-inline { display: flex; gap: 0; flex: 1; max-width: 240px; min-width: 60px; position: relative; }
         .search-inline input {
             flex: 1;
             padding: 8px 10px;
@@ -123,6 +123,32 @@
         }
         .search-inline input::placeholder { font-weight: 400; text-transform: none; color: var(--text-sub); font-size: 0.8rem; }
         .search-inline input:focus { border-color: var(--accent); background: var(--hover-bg); }
+
+        .ticker-search-dropdown {
+            position: absolute;
+            top: calc(100% + 4px);
+            left: 0; right: 0;
+            background: var(--card-bg);
+            border: 1px solid var(--card-border);
+            border-radius: 12px;
+            box-shadow: 0 8px 24px rgba(0,0,0,0.35);
+            max-height: 280px;
+            overflow-y: auto;
+            z-index: 120;
+        }
+        .ticker-search-item {
+            display: flex;
+            flex-direction: column;
+            gap: 1px;
+            padding: 9px 12px;
+            cursor: pointer;
+            border-bottom: 1px solid var(--divider);
+        }
+        .ticker-search-item:last-child { border-bottom: none; }
+        .ticker-search-item:active { background: var(--hover-bg); }
+        .ticker-search-symbol { font-weight: 800; font-size: 0.88rem; color: var(--text-main); }
+        .ticker-search-name { font-size: 0.74rem; color: var(--text-sub); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .ticker-search-empty { padding: 10px 12px; font-size: 0.78rem; color: var(--text-sub); }
         .search-inline button {
             padding: 0 12px;
             font-size: 1.1rem;
@@ -267,6 +293,12 @@
         }
         .list-chip.active { border-color: var(--accent); color: var(--accent); background: var(--accent-dim); }
         .list-chip-count { font-size: 0.7rem; font-weight: 600; opacity: 0.7; }
+        .list-chip-edit {
+            margin-left: 2px;
+            font-size: 0.68rem;
+            padding: 2px 3px;
+            opacity: 0.7;
+        }
         .list-chip-del {
             margin-left: 2px;
             font-size: 0.72rem;
@@ -284,6 +316,31 @@
             color: var(--text-sub);
             cursor: pointer;
         }
+        .reorder-chip {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            flex-shrink: 0;
+            background: var(--accent-dim);
+            border: 1px solid var(--accent);
+            border-radius: 20px;
+            padding: 4px 4px 4px 10px;
+            font-size: 0.82rem;
+            font-weight: 700;
+            color: var(--accent);
+        }
+        .chip-move {
+            background: var(--card-bg);
+            border: 1px solid var(--input-border);
+            border-radius: 50%;
+            width: 26px;
+            height: 26px;
+            font-size: 0.95rem;
+            font-weight: 800;
+            color: var(--text-main);
+            cursor: pointer;
+        }
+        .chip-move:disabled { opacity: 0.3; cursor: default; }
 
         /* Filter bar */
         .filter-bar {
@@ -352,10 +409,36 @@
             left: 0; top: 0; bottom: 0;
             width: 3px;
             border-radius: 16px 0 0 16px;
+            z-index: 3; /* above .stock-card-fg (2) and .swipe-delete-bg (1) — stays visible mid-swipe */
         }
         .stock-card.sig-buy::before { background: var(--buy-color); }
         .stock-card.sig-sell::before { background: var(--sell-color); }
         .stock-card.sig-hold::before { background: var(--hold-color); }
+
+        /* Swipe-to-delete: red action layer sits behind the card's normal content, revealed
+           by dragging .stock-card-fg leftward. Width here must match REVEAL_WIDTH in JS. */
+        .swipe-delete-bg {
+            position: absolute;
+            top: 0; right: 0; bottom: 0;
+            width: 90px;
+            background: var(--sell-color);
+            color: white;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 2px;
+            font-size: 0.7rem;
+            font-weight: 700;
+            cursor: pointer;
+            z-index: 1;
+        }
+        .swipe-delete-bg span:first-child { font-size: 1.1rem; }
+        .stock-card-fg {
+            position: relative;
+            z-index: 2;
+            background: var(--card-bg);
+        }
 
         .card-inner { padding: 10px 10px 0 14px; }
 
@@ -598,6 +681,39 @@
         .alert-form { display: flex; gap: 6px; margin-top: 10px; flex-wrap: wrap; }
 
         /* Alerts Tab (multi-select watchlist view) */
+        .alerts-subview-tabs {
+            display: flex;
+            gap: 8px;
+            padding: 12px 14px 0;
+        }
+        .subview-tab {
+            flex: 1;
+            padding: 8px 0;
+            background: var(--input-bg);
+            border: 1px solid var(--input-border);
+            border-radius: 10px;
+            font-size: 0.82rem;
+            font-weight: 700;
+            color: var(--text-sub);
+            cursor: pointer;
+        }
+        .subview-tab.active { color: var(--accent); border-color: var(--accent); background: var(--accent-dim); }
+
+        .history-list { padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; }
+        .history-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            background: var(--card-bg);
+            border: 1px solid var(--card-border);
+            border-radius: 12px;
+            padding: 10px 12px;
+        }
+        .history-item-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
+        .history-item-ticker { font-weight: 800; font-size: 0.85rem; }
+        .history-item-msg { font-size: 0.78rem; color: var(--text-sub); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .history-item-time { font-size: 0.7rem; color: var(--text-sub); flex-shrink: 0; white-space: nowrap; }
+
         .alerts-tab-header {
             background: var(--card-bg);
             border: 1px solid var(--card-border);
@@ -773,8 +889,9 @@
             <img class="brand-mark" src="./icons/icon-192.png" alt="Stockz Tracker" title="Home" width="32" height="32" onclick="goHome()">
             <div class="header-actions">
                 <div class="search-inline">
-                    <input type="text" id="tickerInput" placeholder="Ticker…" autocomplete="off" autocorrect="off" autocapitalize="characters" spellcheck="false">
+                    <input type="text" id="tickerInput" placeholder="Ticker or company…" autocomplete="off" autocorrect="off" autocapitalize="characters" spellcheck="false" oninput="onTickerInputChange(this.value)">
                     <button onclick="addStock()">+</button>
+                    <div class="ticker-search-dropdown" id="tickerSearchDropdown" style="display:none;"></div>
                 </div>
                 <button class="icon-pill" onclick="toggleSyncDrawer()" id="syncIcon" title="Cloud Sync">☁️</button>
                 <button class="icon-pill" onclick="toggleTheme()" id="themeIcon">🌙</button>
@@ -945,24 +1062,82 @@
         }
 
         // ============================================================
-        // Multi-watchlist management — create, switch, delete named lists
+        // Multi-watchlist management — create, switch, delete, rename, reorder
         // ============================================================
         function renderListSwitcher() {
             const container = document.getElementById('listSwitcher');
             if (!container) return;
             const names = Object.keys(appState.watchlists);
+            const reordering = !!appState.ui.reorderingLists;
 
-            const chips = names.map(name => {
+            const chips = names.map((name, i) => {
+                const esc = name.replace(/'/g, "\\'");
+                if (reordering) {
+                    return `
+                        <span class="list-chip reorder-chip">
+                            <button class="chip-move" ${i === 0 ? 'disabled' : ''} onclick="moveList('${esc}', -1)">‹</button>
+                            <span class="list-chip-label">${name}</span>
+                            <button class="chip-move" ${i === names.length - 1 ? 'disabled' : ''} onclick="moveList('${esc}', 1)">›</button>
+                        </span>`;
+                }
                 const isActive = name === appState.activeList;
                 const count = appState.watchlists[name].length;
                 return `
-                    <button class="list-chip${isActive ? ' active' : ''}" onclick="switchList('${name.replace(/'/g,"\\'")}')">
+                    <button class="list-chip${isActive ? ' active' : ''}" onclick="switchList('${esc}')">
                         ${name} <span class="list-chip-count">${count}</span>
-                        ${names.length > 1 ? `<span class="list-chip-del" onclick="event.stopPropagation();deleteList('${name.replace(/'/g,"\\'")}')">✕</span>` : ''}
+                        <span class="list-chip-edit" onclick="event.stopPropagation();renameList('${esc}')">✏️</span>
+                        ${names.length > 1 ? `<span class="list-chip-del" onclick="event.stopPropagation();deleteList('${esc}')">✕</span>` : ''}
                     </button>`;
             }).join('');
 
-            container.innerHTML = chips + `<button class="list-chip-add" onclick="promptNewList()">+ New List</button>`;
+            const trailingBtn = reordering
+                ? `<button class="list-chip-add" onclick="toggleReorderMode()">✓ Done</button>`
+                : `<button class="list-chip-add" onclick="promptNewList()">+ New List</button>
+                   ${names.length > 1 ? `<button class="list-chip-add" onclick="toggleReorderMode()">↕ Reorder</button>` : ''}`;
+
+            container.innerHTML = chips + trailingBtn;
+        }
+
+        function toggleReorderMode() {
+            appState.ui.reorderingLists = !appState.ui.reorderingLists;
+            renderListSwitcher();
+        }
+
+        // Swaps a list's position with its neighbor. Reordering is done by rebuilding the
+        // watchlists object with keys re-inserted in the new order — JS objects (and JSON
+        // round-trips through the worker/KV) preserve string-key insertion order, so this is
+        // enough; no separate order array needed.
+        function moveList(name, direction) {
+            const names = Object.keys(appState.watchlists);
+            const idx = names.indexOf(name);
+            const newIdx = idx + direction;
+            if (newIdx < 0 || newIdx >= names.length) return;
+            [names[idx], names[newIdx]] = [names[newIdx], names[idx]];
+            const reordered = {};
+            names.forEach(n => { reordered[n] = appState.watchlists[n]; });
+            appState.watchlists = reordered;
+            saveWatchlistsLocal();
+            persistWatchlist();
+            renderListSwitcher();
+        }
+
+        function renameList(oldName) {
+            const newName = (prompt('Rename list:', oldName) || '').trim();
+            if (!newName || newName === oldName) return;
+            if (newName.length > 30) { alert('List name is too long (max 30 characters)'); return; }
+            if (appState.watchlists[newName]) { alert(`A list named "${newName}" already exists`); return; }
+
+            // Rebuild preserving position — a plain delete+re-add would move the key to the end.
+            const reordered = {};
+            Object.keys(appState.watchlists).forEach(n => {
+                reordered[n === oldName ? newName : n] = appState.watchlists[n];
+            });
+            appState.watchlists = reordered;
+            if (appState.activeList === oldName) appState.activeList = newName;
+            saveWatchlistsLocal();
+            persistWatchlist();
+            renderListSwitcher();
+            if (appState.ui.activeTab === 'alerts') renderAlertsTab();
         }
 
         function switchList(name) {
@@ -1159,7 +1334,7 @@ Signal line = EMA(9) of MACD line</span>
             activeList: localStorage.getItem('activeList') || null, // set below once watchlists is known
             alerts: JSON.parse(localStorage.getItem('alerts')) || {},
             indicators: JSON.parse(localStorage.getItem('indicators')) || {},
-            ui: { charts: {}, news: {}, alerts: {}, cardExpanded: {}, activeTab: 'portfolio' },
+            ui: { charts: {}, news: {}, alerts: {}, cardExpanded: {}, activeTab: 'portfolio', reorderingLists: false, alertsSubView: 'manage' },
             dataCache: {},        // keyed by "TICKER:TF" e.g. "AAPL:1D"
             newsCache: {},
             errors: {},
@@ -1587,7 +1762,7 @@ Signal line = EMA(9) of MACD line</span>
             const containers = ['watchlist', 'alertsView'].map(id => document.getElementById(id)).filter(Boolean);
 
             let active = null;   // the container currently being pulled
-            let startY = 0;
+            let startX = 0, startY = 0;
             let pulling = false;
             let refreshing = false;
 
@@ -1622,6 +1797,7 @@ Signal line = EMA(9) of MACD line</span>
                 container.addEventListener('touchstart', (e) => {
                     if (refreshing || container.style.display === 'none' || container.scrollTop > 0) { pulling = false; return; }
                     active = container;
+                    startX = e.touches[0].clientX;
                     startY = e.touches[0].clientY;
                     pulling = true;
                     indicator.style.top = header.getBoundingClientRect().bottom + 'px';
@@ -1630,7 +1806,11 @@ Signal line = EMA(9) of MACD line</span>
 
                 container.addEventListener('touchmove', (e) => {
                     if (!pulling || active !== container || refreshing) return;
+                    const dx = e.touches[0].clientX - startX;
                     const delta = e.touches[0].clientY - startY;
+                    // A horizontal swipe (e.g. swipe-to-delete on a card) dominates — back off
+                    // entirely and let that gesture own the touch instead of fighting over it.
+                    if (Math.abs(dx) > Math.abs(delta) && Math.abs(dx) > 10) { pulling = false; resetIndicator(); return; }
                     if (delta <= 0 || container.scrollTop > 0) { resetIndicator(); return; }
                     const pull = Math.min(delta * 0.5, MAX_PULL);
                     indicator.style.transform = `translateY(${pull - 40}px)`;
@@ -1652,6 +1832,99 @@ Signal line = EMA(9) of MACD line</span>
                 });
             });
         })();
+
+        // --- Swipe to Delete (Portfolio cards) ---
+        // Attached to #watchlist alongside pull-to-refresh's own listeners on the same element;
+        // rather than trying to suppress one from the other, each gesture independently checks
+        // which axis (horizontal vs vertical) the drag actually committed to and only acts on
+        // its own axis — see the matching dx-dominance check added to setupPullToRefresh above.
+        (function setupSwipeToDelete() {
+            const container = document.getElementById('watchlist');
+            if (!container) return;
+
+            const REVEAL_WIDTH = 90;        // must match .swipe-delete-bg width in CSS
+            const AXIS_LOCK_THRESHOLD = 10; // px of movement before committing to an axis
+
+            let activeFg = null;      // the .stock-card-fg element currently being dragged
+            let activeTicker = null;
+            let startX = 0, startY = 0;
+            let axisLocked = null;    // null | 'horizontal' | 'vertical'
+            let openTicker = null;    // ticker whose delete action is currently revealed, if any
+
+            function closeOpenSwipe() {
+                if (!openTicker) return;
+                const fg = document.getElementById('cardfg-' + openTicker);
+                if (fg) { fg.style.transition = 'transform 0.2s'; fg.style.transform = 'translateX(0)'; }
+                openTicker = null;
+            }
+
+            container.addEventListener('touchstart', (e) => {
+                const cardEl = e.target.closest('.stock-card');
+                if (!cardEl) return;
+                const ticker = cardEl.dataset.ticker;
+                if (!ticker) return;
+                if (openTicker && openTicker !== ticker) closeOpenSwipe();
+
+                activeTicker = ticker;
+                activeFg = document.getElementById('cardfg-' + ticker);
+                startX = e.touches[0].clientX;
+                startY = e.touches[0].clientY;
+                axisLocked = null;
+                if (activeFg) activeFg.style.transition = 'none';
+            }, { passive: true });
+
+            container.addEventListener('touchmove', (e) => {
+                if (!activeFg) return;
+                const dx = e.touches[0].clientX - startX;
+                const dy = e.touches[0].clientY - startY;
+
+                if (!axisLocked) {
+                    if (Math.abs(dx) < AXIS_LOCK_THRESHOLD && Math.abs(dy) < AXIS_LOCK_THRESHOLD) return;
+                    axisLocked = Math.abs(dx) > Math.abs(dy) ? 'horizontal' : 'vertical';
+                }
+                if (axisLocked !== 'horizontal') return; // vertical — leave it to normal scroll / pull-to-refresh
+
+                let translate = Math.min(0, dx); // only allow left swipe (reveal)
+                translate = Math.max(translate, -REVEAL_WIDTH - 24); // slight overswipe resistance cap
+                activeFg.style.transform = `translateX(${translate}px)`;
+            }, { passive: true });
+
+            container.addEventListener('touchend', () => {
+                if (!activeFg) return;
+                activeFg.style.transition = 'transform 0.2s';
+
+                if (axisLocked === 'horizontal') {
+                    const match = activeFg.style.transform.match(/-?\d+\.?\d*/);
+                    const currentX = match ? parseFloat(match[0]) : 0;
+                    if (currentX <= -REVEAL_WIDTH * 0.6) {
+                        activeFg.style.transform = `translateX(-${REVEAL_WIDTH}px)`;
+                        openTicker = activeTicker;
+                    } else {
+                        activeFg.style.transform = 'translateX(0)';
+                        if (openTicker === activeTicker) openTicker = null;
+                    }
+                }
+                activeFg = null;
+                activeTicker = null;
+                axisLocked = null;
+            });
+
+            // Tapping anywhere outside the currently-revealed card closes it.
+            document.addEventListener('touchstart', (e) => {
+                if (!openTicker) return;
+                const cardEl = e.target.closest('.stock-card');
+                if (!cardEl || cardEl.dataset.ticker !== openTicker) closeOpenSwipe();
+            }, { passive: true });
+        })();
+
+        function confirmSwipeDelete(ticker) {
+            if (confirm(`Remove ${ticker} from "${appState.activeList}"?`)) {
+                deleteStock(ticker);
+            } else {
+                const fg = document.getElementById('cardfg-' + ticker);
+                if (fg) { fg.style.transition = 'transform 0.2s'; fg.style.transform = 'translateX(0)'; }
+            }
+        }
 
         // --- Alert System Logic ---
         function requestNotificationPermission() {
@@ -1867,7 +2140,8 @@ Signal line = EMA(9) of MACD line</span>
             const bar = document.getElementById('bulkAlertBar');
             if (!bar) return;
             const count = selectedAlertTickers.size;
-            const visible = count > 0 && appState.ui.activeTab === 'alerts';
+            const inManageView = (appState.ui.alertsSubView || 'manage') === 'manage';
+            const visible = count > 0 && appState.ui.activeTab === 'alerts' && inManageView;
             bar.style.display = visible ? 'block' : 'none';
             const countEl = document.getElementById('bulkAlertCount');
             if (countEl) countEl.textContent = `${count} selected`;
@@ -1934,12 +2208,30 @@ Signal line = EMA(9) of MACD line</span>
             renderAlertsTab();
         }
 
+        function setAlertsSubView(view) {
+            appState.ui.alertsSubView = view;
+            renderAlertsTab();
+        }
+
         function renderAlertsTab() {
             const container = document.getElementById('alertsView');
             if (!container) return;
+            const subView = appState.ui.alertsSubView || 'manage';
+
+            const subViewTabs = `
+                <div class="alerts-subview-tabs">
+                    <button class="subview-tab${subView === 'manage' ? ' active' : ''}" onclick="setAlertsSubView('manage')">Manage</button>
+                    <button class="subview-tab${subView === 'history' ? ' active' : ''}" onclick="setAlertsSubView('history')">📜 History</button>
+                </div>`;
+
+            if (subView === 'history') {
+                renderAlertHistoryView(container, subViewTabs);
+                updateBulkAlertBar();
+                return;
+            }
 
             if (!activeWatchlist().length) {
-                container.innerHTML = '<div class="info-card">No stocks tracked yet — add one from the Portfolio tab.</div>';
+                container.innerHTML = subViewTabs + '<div class="info-card">No stocks tracked yet — add one from the Portfolio tab.</div>';
                 updateBulkAlertBar();
                 return;
             }
@@ -1976,7 +2268,7 @@ Signal line = EMA(9) of MACD line</span>
                     </div>`;
             }).join('');
 
-            container.innerHTML = `
+            container.innerHTML = subViewTabs + `
                 <div class="alerts-tab-header">
                     <div class="alerts-select-row">
                         <button class="preset-btn" onclick="selectAllAlertTickers(true)">Select All</button>
@@ -1991,6 +2283,51 @@ Signal line = EMA(9) of MACD line</span>
                 <div class="alerts-ticker-list">${rows}</div>
             `;
             updateBulkAlertBar();
+        }
+
+        // Renders the alert-history sub-view. Fetches fresh from the server each time it's
+        // opened (history is cheap and small — capped at 50 entries server-side) rather than
+        // caching locally, so it always reflects what the cron evaluator has actually fired.
+        async function renderAlertHistoryView(container, subViewTabs) {
+            if (!appState.pin) {
+                container.innerHTML = subViewTabs + '<div class="info-card">⚠️ Set a sync PIN (☁️ above) to see alert history — it\'s tracked server-side alongside the cloud evaluator.</div>';
+                return;
+            }
+
+            container.innerHTML = subViewTabs + '<div class="info-card">Loading history...</div>';
+            try {
+                const res = await fetch(`${CONFIG.WORKER_BASE}/api/alerts/history?pin=${encodeURIComponent(appState.pin)}`);
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                const data = await res.json();
+                const history = Array.isArray(data.history) ? data.history : [];
+
+                // Guard against a stale response landing after the user navigated away.
+                if (appState.ui.activeTab !== 'alerts' || (appState.ui.alertsSubView || 'manage') !== 'history') return;
+
+                if (!history.length) {
+                    container.innerHTML = subViewTabs + '<div class="info-card">No alerts have fired yet.</div>';
+                    return;
+                }
+
+                const items = history.map(h => {
+                    const when = new Date(h.triggeredAt);
+                    const timeStr = isNaN(when.getTime()) ? '' : when.toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+                    return `
+                        <div class="history-item">
+                            <div class="history-item-main">
+                                <span class="history-item-ticker">${h.ticker}</span>
+                                <span class="history-item-msg">${h.message}</span>
+                            </div>
+                            <span class="history-item-time">${timeStr}</span>
+                        </div>`;
+                }).join('');
+
+                container.innerHTML = subViewTabs + `<div class="history-list">${items}</div>`;
+            } catch (e) {
+                if (appState.ui.activeTab === 'alerts' && (appState.ui.alertsSubView || 'manage') === 'history') {
+                    container.innerHTML = subViewTabs + `<div class="info-card error-card">Failed to load history: ${e.message}</div>`;
+                }
+            }
         }
 
         // --- Debounced renderUI ---
@@ -2142,6 +2479,10 @@ Signal line = EMA(9) of MACD line</span>
 
             return `
                 <div class="stock-card sig-${sigClass}" data-ticker="${ticker}">
+                    <div class="swipe-delete-bg" onclick="confirmSwipeDelete('${ticker}')">
+                        <span>🗑</span><span>Delete</span>
+                    </div>
+                    <div class="stock-card-fg" id="cardfg-${ticker}">
                     <div class="card-inner">
                         <div class="card-top">
                             <div class="card-left">
@@ -2238,6 +2579,7 @@ Signal line = EMA(9) of MACD line</span>
                         <button class="icon-btn" onclick="deleteStock('${ticker}')" title="Remove">✕</button>
                     </div>
                     `}
+                    </div>
                 </div>
             `;
         }
@@ -2791,6 +3133,62 @@ Signal line = EMA(9) of MACD line</span>
         }
         let _indSaveTimer = null;
 
+        // --- Ticker / company-name search-as-you-type ---
+        let _tickerSearchTimer = null;
+        let _tickerSearchSeq = 0; // guards against a slow earlier request overwriting a faster later one
+
+        function onTickerInputChange(value) {
+            clearTimeout(_tickerSearchTimer);
+            const q = value.trim();
+            if (q.length < 2) { hideTickerSearchDropdown(); return; }
+            _tickerSearchTimer = setTimeout(() => runTickerSearch(q), 300);
+        }
+
+        async function runTickerSearch(q) {
+            const seq = ++_tickerSearchSeq;
+            try {
+                const res = await fetch(`${CONFIG.WORKER_BASE}/api/search-ticker?q=${encodeURIComponent(q)}`);
+                if (seq !== _tickerSearchSeq) return; // a newer keystroke already superseded this request
+                if (!res.ok) { hideTickerSearchDropdown(); return; }
+                const data = await res.json();
+                renderTickerSearchDropdown(data.results || []);
+            } catch (e) {
+                if (seq === _tickerSearchSeq) hideTickerSearchDropdown();
+            }
+        }
+
+        function renderTickerSearchDropdown(results) {
+            const dropdown = document.getElementById('tickerSearchDropdown');
+            if (!dropdown) return;
+            if (!results.length) {
+                dropdown.innerHTML = '<div class="ticker-search-empty">No matches</div>';
+                dropdown.style.display = 'block';
+                return;
+            }
+            dropdown.innerHTML = results.map(r => `
+                <div class="ticker-search-item" onmousedown="event.preventDefault()" onclick="selectTickerSearchResult('${r.symbol.replace(/'/g,"\\'")}')">
+                    <span class="ticker-search-symbol">${r.symbol}${r.exchange ? ' · ' + r.exchange : ''}</span>
+                    <span class="ticker-search-name">${r.name}</span>
+                </div>`).join('');
+            dropdown.style.display = 'block';
+        }
+
+        function hideTickerSearchDropdown() {
+            const dropdown = document.getElementById('tickerSearchDropdown');
+            if (dropdown) dropdown.style.display = 'none';
+        }
+
+        function selectTickerSearchResult(symbol) {
+            const input = document.getElementById('tickerInput');
+            if (input) input.value = symbol;
+            hideTickerSearchDropdown();
+            addStock();
+        }
+
+        document.addEventListener('click', (e) => {
+            if (!e.target.closest('.search-inline')) hideTickerSearchDropdown();
+        });
+
         function addStock() {
             const val = document.getElementById('tickerInput').value.toUpperCase().trim();
             const input = document.getElementById('tickerInput');
@@ -2804,7 +3202,7 @@ Signal line = EMA(9) of MACD line</span>
                 input.placeholder = 'Use symbol e.g. NFLX, AAPL';
                 setTimeout(() => {
                     input.style.borderColor = '';
-                    input.placeholder = 'Ticker…';
+                    input.placeholder = 'Ticker or company…';
                 }, 2500);
                 return;
             }
@@ -2814,7 +3212,7 @@ Signal line = EMA(9) of MACD line</span>
                 input.placeholder = `${val} already added`;
                 setTimeout(() => {
                     input.style.borderColor = '';
-                    input.placeholder = 'Ticker…';
+                    input.placeholder = 'Ticker or company…';
                 }, 2000);
                 return;
             }
@@ -2822,6 +3220,7 @@ Signal line = EMA(9) of MACD line</span>
             activeWatchlist().unshift(val);
             persistWatchlist();
             input.value = '';
+            hideTickerSearchDropdown();
             document.getElementById('watchlist').innerHTML = '<div class="info-card">Fetching...</div>';
             updateData();
         }
