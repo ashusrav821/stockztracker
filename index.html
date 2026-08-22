@@ -910,6 +910,10 @@
                 <button style="flex:1;" id="pushBtn" onclick="enablePushAlerts()">🔔 Enable Watch Alerts</button>
             </div>
             <div class="sync-status" id="pushStatus"></div>
+            <div class="sync-row" id="installRow" style="margin-top:6px; display:none;">
+                <button style="flex:1;" id="installBtn" onclick="installApp()">📲 Install App</button>
+            </div>
+            <div class="sync-status" id="installStatus"></div>
         </div>
     </header>
 
@@ -1746,6 +1750,63 @@ Signal line = EMA(9) of MACD line</span>
                 navigator.serviceWorker.register('./sw.js').catch(e => console.error('SW registration failed:', e));
             });
         }
+
+        // --- Install to Home Screen ---
+        // Chrome/Edge/Android fire beforeinstallprompt and let us trigger the native install
+        // dialog programmatically. iOS Safari never fires it — there's no programmatic install
+        // API there — so we detect iOS and show manual "Add to Home Screen" instructions instead.
+        let deferredInstallPrompt = null;
+
+        function isRunningStandalone() {
+            return window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
+        }
+
+        function setInstallStatus(msg, type) {
+            const el = document.getElementById('installStatus');
+            if (el) { el.textContent = msg; el.className = 'sync-status' + (type ? ' ' + type : ''); }
+        }
+
+        window.addEventListener('beforeinstallprompt', (e) => {
+            e.preventDefault(); // suppress Chrome's automatic mini-infobar — we show our own button instead
+            deferredInstallPrompt = e;
+            if (!isRunningStandalone()) {
+                const row = document.getElementById('installRow');
+                if (row) row.style.display = 'flex';
+            }
+        });
+
+        window.addEventListener('appinstalled', () => {
+            deferredInstallPrompt = null;
+            const row = document.getElementById('installRow');
+            if (row) row.style.display = 'none';
+            setInstallStatus('Installed ✓', 'ok');
+        });
+
+        async function installApp() {
+            if (deferredInstallPrompt) {
+                deferredInstallPrompt.prompt();
+                const { outcome } = await deferredInstallPrompt.userChoice;
+                deferredInstallPrompt = null;
+                if (outcome === 'accepted') {
+                    document.getElementById('installRow').style.display = 'none';
+                    setInstallStatus('Installed ✓', 'ok');
+                } else {
+                    setInstallStatus('Install dismissed', '');
+                }
+            }
+        }
+
+        // iOS Safari fallback: no beforeinstallprompt exists there, so if we detect iOS and the
+        // app isn't already running standalone, show instructions instead of a button.
+        (function checkIosInstall() {
+            const isIos = /iphone|ipad|ipod/i.test(navigator.userAgent) && !window.MSStream;
+            if (!isIos || isRunningStandalone()) return;
+            const row = document.getElementById('installRow');
+            if (row) {
+                row.innerHTML = '<div style="font-size:0.78rem;color:var(--text-sub);flex:1;">📲 To install: tap <strong>Share</strong> in Safari, then <strong>"Add to Home Screen"</strong>.</div>';
+                row.style.display = 'flex';
+            }
+        })();
 
         // --- Pull to Refresh ---
         // Each <main> scrolls internally (overflow-y: auto), not the window, so the gesture
