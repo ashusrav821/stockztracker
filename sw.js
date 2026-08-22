@@ -11,8 +11,15 @@ const urlsToCache = [
 
 self.addEventListener('install', event => {
   event.waitUntil(
-    caches.open(CACHE_NAME)
-      .then(cache => cache.addAll(urlsToCache))
+    caches.open(CACHE_NAME).then(cache =>
+      // Promise.allSettled instead of cache.addAll: addAll is all-or-nothing, so a single
+      // missing/404 asset (e.g. an icon not yet deployed) would silently fail the ENTIRE
+      // install — leaving the old service worker (without push handlers) in control. One
+      // broken asset must never be able to block push notifications from working again.
+      Promise.allSettled(
+        urlsToCache.map(url => cache.add(url).catch(e => console.warn('SW precache failed for', url, e)))
+      )
+    )
   );
   self.skipWaiting();
 });
@@ -56,8 +63,8 @@ self.addEventListener('push', event => {
   const title = data.title || 'Stock Alert';
   const options = {
     body: data.body || '',
-    icon: data.icon || './icon-192.png',
-    badge: data.badge || './icon-192.png',
+    icon: data.icon || './icons/icon-192.png',
+    badge: data.badge || './icons/icon-192.png',
     tag: data.tag,          // same-ticker alerts replace each other instead of stacking
     renotify: !!data.tag,
     data: { url: data.url || './' },
