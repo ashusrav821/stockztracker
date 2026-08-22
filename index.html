@@ -566,13 +566,44 @@
             border: 1px solid var(--card-border);
             border-radius: 12px;
             padding: 10px 12px;
+            cursor: pointer;
+            transition: background 0.12s, border-color 0.12s;
         }
-        .alert-ticker-label { display: flex; align-items: center; gap: 8px; cursor: pointer; }
+        .alert-ticker-row:active { background: var(--hover-bg); }
+        .alert-ticker-row.selected {
+            border-color: var(--accent);
+            background: var(--accent-dim);
+        }
+        .alert-ticker-label { display: flex; align-items: center; gap: 8px; }
         .alert-ticker-check { width: 18px; height: 18px; flex-shrink: 0; accent-color: var(--accent); }
         .alert-ticker-name { font-weight: 800; font-size: 0.95rem; }
         .alert-ticker-meta { font-size: 0.78rem; color: var(--text-sub); margin-left: auto; }
-        .alert-ticker-rules { margin-top: 8px; padding-left: 26px; display: flex; flex-direction: column; gap: 4px; }
+        .alert-ticker-rules { margin-top: 8px; padding-left: 26px; display: flex; flex-direction: column; gap: 4px; cursor: default; }
         .alert-ticker-empty { font-size: 0.76rem; color: var(--text-sub); padding-left: 26px; }
+
+        /* Sticky bulk-action bar — floats above the bottom nav, only shown while 1+ tickers are selected */
+        .bulk-alert-bar {
+            position: fixed;
+            left: 0; right: 0;
+            bottom: calc(54px + env(safe-area-inset-bottom, 0px));
+            background: var(--card-bg);
+            border-top: 1px solid var(--accent);
+            box-shadow: 0 -4px 16px rgba(0,0,0,0.25);
+            padding: 10px 14px;
+            z-index: 98;
+        }
+        .bulk-alert-bar-header { display: flex; align-items: center; margin-bottom: 8px; }
+        .bulk-alert-bar-header span { font-weight: 800; font-size: 0.88rem; color: var(--accent); }
+        .bulk-clear-btn {
+            margin-left: auto;
+            background: none;
+            border: none;
+            color: var(--text-sub);
+            font-size: 0.8rem;
+            font-weight: 600;
+            cursor: pointer;
+            padding: 4px 6px;
+        }
         .alert-form select, .alert-form input {
             background: var(--input-bg);
             color: var(--text-main);
@@ -733,11 +764,42 @@
         <div class="info-card">Initializing Data...</div>
     </main>
 
-    <main id="alertsView" style="display:none;"></main>
+    <main id="alertsView" style="display:none; padding-bottom: 260px;"></main>
 
     <main id="guideView" style="display:none;"></main>
 
     <!-- Bottom nav — moved from the top header so navigation sits in thumb reach -->
+    <!-- Bulk alert action bar — appears above the bottom nav once 1+ stocks are selected on the Alerts tab -->
+    <div class="bulk-alert-bar" id="bulkAlertBar" style="display:none;">
+        <div class="bulk-alert-bar-header">
+            <span id="bulkAlertCount">0 selected</span>
+            <button class="bulk-clear-btn" onclick="selectAllAlertTickers(false)">Clear ✕</button>
+        </div>
+        <div class="alert-presets">
+            <button class="preset-btn" onclick="addPresetAlertToSelected('price_drop_pct',5)">🔻 -5%</button>
+            <button class="preset-btn" onclick="addPresetAlertToSelected('price_drop_pct',10)">🔻 -10%</button>
+            <button class="preset-btn" onclick="addPresetAlertToSelected('price_drop_pct',15)">🔻 -15%</button>
+            <button class="preset-btn" onclick="addPresetAlertToSelected('rsi_below',30)">RSI &lt; 30</button>
+            <button class="preset-btn" onclick="addPresetAlertToSelected('rsi_above',70)">RSI &gt; 70</button>
+            <button class="preset-btn" onclick="toggleBulkCustomForm()">⚙️ Custom</button>
+        </div>
+        <div class="alert-form" id="bulkCustomForm" style="display:none;">
+            <select id="alertsTab-type">
+                <option value="price_drop_pct">Price drops %</option>
+                <option value="price_rise_pct">Price rises %</option>
+                <option value="rsi_below">RSI below</option>
+                <option value="rsi_above">RSI above</option>
+                <option value="price_above">Price above $</option>
+                <option value="price_below">Price below $</option>
+                <option value="sma_above">SMA50 above $</option>
+                <option value="sma_below">SMA50 below $</option>
+            </select>
+            <input type="number" id="alertsTab-val" placeholder="Value">
+            <button onclick="addCustomAlertToSelected()">Apply</button>
+        </div>
+        <div class="sync-status" id="alertsTabStatus"></div>
+    </div>
+
     <nav class="bottom-nav" id="bottomNav">
         <button class="bottom-nav-btn active" id="tab-portfolio" onclick="switchTab('portfolio')">
             <span class="bottom-nav-icon">📊</span>
@@ -815,7 +877,9 @@
                 guide.dataset.rendered = '1';
             }
             if (tab === 'alerts') {
-                renderAlertsTab();
+                renderAlertsTab(); // also updates the bulk-action bar
+            } else {
+                updateBulkAlertBar(); // hides it — activeTab is no longer 'alerts'
             }
         }
 
@@ -1637,16 +1701,38 @@ Signal line = EMA(9) of MACD line</span>
             if (el) { el.textContent = msg; el.className = 'sync-status' + (type ? ' ' + type : ''); }
         }
 
+        // Keeps the sticky bulk-action bar in sync with the current selection — shown only
+        // while the Alerts tab is active and at least one ticker is checked.
+        function updateBulkAlertBar() {
+            const bar = document.getElementById('bulkAlertBar');
+            if (!bar) return;
+            const count = selectedAlertTickers.size;
+            const visible = count > 0 && appState.ui.activeTab === 'alerts';
+            bar.style.display = visible ? 'block' : 'none';
+            const countEl = document.getElementById('bulkAlertCount');
+            if (countEl) countEl.textContent = `${count} selected`;
+        }
+
         function toggleAlertTickerSelection(ticker, checked) {
             if (checked) selectedAlertTickers.add(ticker); else selectedAlertTickers.delete(ticker);
-            const countEl = document.getElementById('alertsSelectCount');
-            if (countEl) countEl.textContent = `${selectedAlertTickers.size} selected`;
+        }
+
+        // Toggles selection for a whole row tap. Taps inside .alert-ticker-rules (existing
+        // alert badges / delete buttons) are excluded via stopPropagation on that element.
+        function handleAlertRowTap(ticker) {
+            toggleAlertTickerSelection(ticker, !selectedAlertTickers.has(ticker));
+            renderAlertsTab();
         }
 
         function selectAllAlertTickers(select) {
             if (select) appState.watchlist.forEach(t => selectedAlertTickers.add(t));
             else selectedAlertTickers.clear();
             renderAlertsTab();
+        }
+
+        function toggleBulkCustomForm() {
+            const form = document.getElementById('bulkCustomForm');
+            if (form) form.style.display = form.style.display === 'none' ? 'flex' : 'none';
         }
 
         // Applies a quick preset (drop %, RSI band) to every currently checked ticker in one shot —
@@ -1694,6 +1780,7 @@ Signal line = EMA(9) of MACD line</span>
 
             if (!appState.watchlist.length) {
                 container.innerHTML = '<div class="info-card">No stocks tracked yet — add one from the Portfolio tab.</div>';
+                updateBulkAlertBar();
                 return;
             }
 
@@ -1717,14 +1804,15 @@ Signal line = EMA(9) of MACD line</span>
                         </div>`).join('')
                     : '<div class="alert-ticker-empty">No alerts set</div>';
 
+                const isSelected = selectedAlertTickers.has(ticker);
                 return `
-                    <div class="alert-ticker-row">
-                        <label class="alert-ticker-label">
-                            <input type="checkbox" class="alert-ticker-check" value="${ticker}" ${selectedAlertTickers.has(ticker) ? 'checked' : ''} onchange="toggleAlertTickerSelection('${ticker}', this.checked)">
+                    <div class="alert-ticker-row${isSelected ? ' selected' : ''}" onclick="handleAlertRowTap('${ticker}')">
+                        <div class="alert-ticker-label">
+                            <input type="checkbox" class="alert-ticker-check" value="${ticker}" ${isSelected ? 'checked' : ''} tabindex="-1" style="pointer-events:none;">
                             <span class="alert-ticker-name">${ticker}</span>
                             <span class="alert-ticker-meta">${meta}</span>
-                        </label>
-                        <div class="alert-ticker-rules">${rulesHtml}</div>
+                        </div>
+                        <div class="alert-ticker-rules" onclick="event.stopPropagation()">${rulesHtml}</div>
                     </div>`;
             }).join('');
 
@@ -1735,36 +1823,14 @@ Signal line = EMA(9) of MACD line</span>
                         <button class="preset-btn" onclick="selectAllAlertTickers(false)">Clear</button>
                         <span class="alerts-select-count" id="alertsSelectCount">${selectedAlertTickers.size} selected</span>
                     </div>
-                    <div style="font-size:0.72rem;color:var(--text-sub);margin:10px 0 5px;font-weight:600;text-transform:uppercase;letter-spacing:0.4px;">Apply Preset to Selected</div>
-                    <div class="alert-presets">
-                        <button class="preset-btn" onclick="addPresetAlertToSelected('price_drop_pct',5)">🔻 -5%</button>
-                        <button class="preset-btn" onclick="addPresetAlertToSelected('price_drop_pct',10)">🔻 -10%</button>
-                        <button class="preset-btn" onclick="addPresetAlertToSelected('price_drop_pct',15)">🔻 -15%</button>
-                        <button class="preset-btn" onclick="addPresetAlertToSelected('rsi_below',30)">RSI &lt; 30</button>
-                        <button class="preset-btn" onclick="addPresetAlertToSelected('rsi_above',70)">RSI &gt; 70</button>
-                    </div>
-                    <div style="font-size:0.72rem;color:var(--text-sub);margin:10px 0 5px;font-weight:600;text-transform:uppercase;letter-spacing:0.4px;">Apply Custom Alert to Selected</div>
-                    <div class="alert-form">
-                        <select id="alertsTab-type">
-                            <option value="price_drop_pct">Price drops %</option>
-                            <option value="price_rise_pct">Price rises %</option>
-                            <option value="rsi_below">RSI below</option>
-                            <option value="rsi_above">RSI above</option>
-                            <option value="price_above">Price above $</option>
-                            <option value="price_below">Price below $</option>
-                            <option value="sma_above">SMA50 above $</option>
-                            <option value="sma_below">SMA50 below $</option>
-                        </select>
-                        <input type="number" id="alertsTab-val" placeholder="Value">
-                        <button onclick="addCustomAlertToSelected()">Apply</button>
-                    </div>
-                    <div class="sync-status" id="alertsTabStatus"></div>
-                    <div style="font-size:0.7rem;color:var(--text-sub);margin-top:6px;">
+                    <div style="font-size:0.7rem;color:var(--text-sub);margin-top:8px;">
+                        Tap a stock to select it, then use the bar below to apply an alert to everything you've picked.<br>
                         ${appState.pin ? '🔔 Alerts sync to your PIN and evaluate in the cloud, even when the app is closed.' : '⚠️ Set a sync PIN (☁️ above) so alerts can be checked while the app is closed.'}
                     </div>
                 </div>
                 <div class="alerts-ticker-list">${rows}</div>
             `;
+            updateBulkAlertBar();
         }
 
         // --- Debounced renderUI ---
