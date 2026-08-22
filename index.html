@@ -238,6 +238,50 @@
         .pull-refresh-indicator.refreshing .pull-refresh-spinner { animation: prSpin 0.7s linear infinite; }
         @keyframes prSpin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
 
+        /* List switcher — horizontal scrollable chips for multiple named watchlists */
+        .list-switcher {
+            display: none; /* flex when shown via switchTab/JS */
+            gap: 6px;
+            padding: 8px 12px 0;
+            overflow-x: auto;
+            white-space: nowrap;
+            scrollbar-width: none;
+        }
+        .list-switcher::-webkit-scrollbar { display: none; }
+        .list-chip {
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            flex-shrink: 0;
+            background: var(--input-bg);
+            border: 1px solid var(--input-border);
+            border-radius: 20px;
+            padding: 7px 12px;
+            font-size: 0.82rem;
+            font-weight: 700;
+            color: var(--text-sub);
+            cursor: pointer;
+        }
+        .list-chip.active { border-color: var(--accent); color: var(--accent); background: var(--accent-dim); }
+        .list-chip-count { font-size: 0.7rem; font-weight: 600; opacity: 0.7; }
+        .list-chip-del {
+            margin-left: 2px;
+            font-size: 0.72rem;
+            color: var(--text-sub);
+            padding: 2px 4px;
+        }
+        .list-chip-add {
+            flex-shrink: 0;
+            background: none;
+            border: 1px dashed var(--input-border);
+            border-radius: 20px;
+            padding: 7px 12px;
+            font-size: 0.82rem;
+            font-weight: 700;
+            color: var(--text-sub);
+            cursor: pointer;
+        }
+
         /* Filter bar */
         .filter-bar {
             display: flex;
@@ -284,7 +328,7 @@
         main {
             flex: 1;
             overflow-y: auto;
-            padding: 10px 12px calc(70px + env(safe-area-inset-bottom, 0px));
+            padding: 10px 12px calc(110px + env(safe-area-inset-bottom, 0px));
             overscroll-behavior-y: contain; /* stop the browser's own pull-to-refresh from fighting ours */
             position: relative;
         }
@@ -755,6 +799,8 @@
         <span class="pull-refresh-text">Pull to refresh</span>
     </div>
 
+    <div class="list-switcher" id="listSwitcher"></div>
+
     <div class="filter-bar" id="filterBar">
         <input type="text" id="filterInput" placeholder="🔍  Filter stocks…" autocomplete="off" autocorrect="off" autocapitalize="characters" spellcheck="false" oninput="filterWatchlist(this.value)">
         <button class="filter-clear" id="filterClear" onclick="clearFilter()" style="display:none;">✕</button>
@@ -860,13 +906,16 @@
             const tabGuide = document.getElementById('tab-guide');
             const tabAlerts = document.getElementById('tab-alerts');
             const filterBar = document.getElementById('filterBar');
+            const listSwitcher = document.getElementById('listSwitcher');
 
             appState.ui.activeTab = tab;
 
             portfolio.style.display = tab === 'portfolio' ? '' : 'none';
             guide.style.display = tab === 'guide' ? 'block' : 'none';
             alertsTab.style.display = tab === 'alerts' ? 'block' : 'none';
+            const showChrome = tab === 'portfolio' || tab === 'alerts'; // both operate on the active list
             if (filterBar) filterBar.style.display = tab === 'portfolio' ? 'flex' : 'none';
+            if (listSwitcher) listSwitcher.style.display = showChrome ? 'flex' : 'none';
 
             tabPortfolio.classList.toggle('active', tab === 'portfolio');
             tabGuide.classList.toggle('active', tab === 'guide');
@@ -881,6 +930,72 @@
             } else {
                 updateBulkAlertBar(); // hides it — activeTab is no longer 'alerts'
             }
+        }
+
+        // ============================================================
+        // Multi-watchlist management — create, switch, delete named lists
+        // ============================================================
+        function renderListSwitcher() {
+            const container = document.getElementById('listSwitcher');
+            if (!container) return;
+            const names = Object.keys(appState.watchlists);
+
+            const chips = names.map(name => {
+                const isActive = name === appState.activeList;
+                const count = appState.watchlists[name].length;
+                return `
+                    <button class="list-chip${isActive ? ' active' : ''}" onclick="switchList('${name.replace(/'/g,"\\'")}')">
+                        ${name} <span class="list-chip-count">${count}</span>
+                        ${names.length > 1 ? `<span class="list-chip-del" onclick="event.stopPropagation();deleteList('${name.replace(/'/g,"\\'")}')">✕</span>` : ''}
+                    </button>`;
+            }).join('');
+
+            container.innerHTML = chips + `<button class="list-chip-add" onclick="promptNewList()">+ New List</button>`;
+        }
+
+        function switchList(name) {
+            if (name === appState.activeList) return;
+            appState.activeList = name;
+            saveWatchlistsLocal();
+            renderListSwitcher();
+            document.getElementById('watchlist').innerHTML = '<div class="info-card">Fetching...</div>';
+            updateData(); // fetches any tickers in this list not already cached, then renders
+            if (appState.ui.activeTab === 'alerts') renderAlertsTab();
+        }
+
+        function promptNewList() {
+            const name = (prompt('Name for the new watchlist:') || '').trim();
+            if (!name) return;
+            if (name.length > 30) { alert('List name is too long (max 30 characters)'); return; }
+            if (appState.watchlists[name]) { alert(`A list named "${name}" already exists`); switchList(name); return; }
+
+            appState.watchlists[name] = [];
+            appState.activeList = name;
+            saveWatchlistsLocal();
+            persistWatchlist(); // also syncs to cloud if a PIN is set
+            renderListSwitcher();
+            renderUI();
+        }
+
+        function deleteList(name) {
+            const names = Object.keys(appState.watchlists);
+            if (names.length <= 1) { alert("Can't delete your only watchlist"); return; }
+            const count = appState.watchlists[name].length;
+            const confirmMsg = count > 0
+                ? `Delete "${name}"? This removes ${count} ticker${count === 1 ? '' : 's'} from this list (your alerts for those tickers stay intact if they're in another list).`
+                : `Delete "${name}"?`;
+            if (!confirm(confirmMsg)) return;
+
+            delete appState.watchlists[name];
+            if (appState.activeList === name) {
+                appState.activeList = Object.keys(appState.watchlists)[0];
+            }
+            saveWatchlistsLocal();
+            persistWatchlist();
+            renderListSwitcher();
+            document.getElementById('watchlist').innerHTML = '<div class="info-card">Fetching...</div>';
+            updateData();
+            if (appState.ui.activeTab === 'alerts') renderAlertsTab();
         }
 
         // Filter rendered cards by ticker — pure DOM show/hide, no re-render.
@@ -1014,17 +1129,50 @@ Signal line = EMA(9) of MACD line</span>
         };
 
         // --- State Management Engine ---
+        // Multi-watchlist migration: older versions stored a single flat array under 'stocks'.
+        // Wrap it into the new { listName: [tickers] } shape once, on first load after upgrade.
+        function migrateToMultiWatchlist() {
+            const existing = localStorage.getItem('watchlists');
+            if (existing) {
+                try { return JSON.parse(existing); } catch (e) { /* fall through to rebuild */ }
+            }
+            const legacy = JSON.parse(localStorage.getItem('stocks') || 'null');
+            const lists = { 'My Watchlist': legacy || ['AAPL', 'TSLA', 'MSFT'] };
+            localStorage.setItem('watchlists', JSON.stringify(lists));
+            return lists;
+        }
+
         let appState = {
-            watchlist: JSON.parse(localStorage.getItem('stocks')) || ['AAPL', 'TSLA', 'MSFT'],
+            watchlists: migrateToMultiWatchlist(),   // { "Tech": ["AAPL","MSFT"], "Dividends": [...] }
+            activeList: localStorage.getItem('activeList') || null, // set below once watchlists is known
             alerts: JSON.parse(localStorage.getItem('alerts')) || {},
             indicators: JSON.parse(localStorage.getItem('indicators')) || {},
-            ui: { charts: {}, news: {}, alerts: {}, activeTab: 'portfolio' },
+            ui: { charts: {}, news: {}, alerts: {}, cardExpanded: {}, activeTab: 'portfolio' },
             dataCache: {},        // keyed by "TICKER:TF" e.g. "AAPL:1D"
             newsCache: {},
             errors: {},
             pin: localStorage.getItem('syncPin') || '',
             timeframe: {},        // per-ticker active timeframe key, e.g. { AAPL: '1D' }
         };
+        // Guard against a stale activeList pointing at a list that no longer exists (e.g. deleted
+        // on another device and synced back down) — fall back to the first available list.
+        if (!appState.activeList || !appState.watchlists[appState.activeList]) {
+            appState.activeList = Object.keys(appState.watchlists)[0] || 'My Watchlist';
+            if (!appState.watchlists[appState.activeList]) appState.watchlists[appState.activeList] = [];
+        }
+
+        // Single accessor for "the array of tickers in the currently active list" — every place
+        // that used to read/write appState.watchlist directly now goes through this, so switching
+        // lists doesn't require touching rendering/data logic at all.
+        function activeWatchlist() {
+            if (!appState.watchlists[appState.activeList]) appState.watchlists[appState.activeList] = [];
+            return appState.watchlists[appState.activeList];
+        }
+
+        function saveWatchlistsLocal() {
+            localStorage.setItem('watchlists', JSON.stringify(appState.watchlists));
+            localStorage.setItem('activeList', appState.activeList);
+        }
 
         window.myCharts = {};
 
@@ -1275,19 +1423,18 @@ Signal line = EMA(9) of MACD line</span>
                 const res = await fetch(`${CONFIG.WORKER_BASE}/api/watchlist?pin=${encodeURIComponent(pin)}`);
                 if (!res.ok) throw new Error(`HTTP ${res.status}`);
                 const data = await res.json();
-                if (!data.watchlist) { setSyncStatus('No saved watchlist found for this PIN', 'error'); return; }
-                if (!Array.isArray(data.watchlist) || !data.watchlist.every(t => typeof t === 'string')) {
-                    setSyncStatus('Cloud watchlist data is malformed', 'error');
-                    return;
-                }
+                if (!data.watchlists || typeof data.watchlists !== 'object') { setSyncStatus('No saved watchlists found for this PIN', 'error'); return; }
 
-                appState.watchlist = data.watchlist;
+                appState.watchlists = data.watchlists;
+                appState.activeList = Object.keys(appState.watchlists)[0] || 'My Watchlist';
+                if (!appState.watchlists[appState.activeList]) appState.watchlists[appState.activeList] = [];
                 appState.pin = pin;
-                localStorage.setItem('stocks', JSON.stringify(appState.watchlist));
+                saveWatchlistsLocal();
                 localStorage.setItem('syncPin', pin);
 
-                setSyncStatus('Loaded watchlist from cloud', 'ok');
+                setSyncStatus('Loaded watchlists from cloud', 'ok');
                 document.getElementById('watchlist').innerHTML = '<div class="info-card">Fetching...</div>';
+                renderListSwitcher();
                 await loadAlertsFromServer();
                 await updateData();
             } catch(e) {
@@ -1304,7 +1451,7 @@ Signal line = EMA(9) of MACD line</span>
                 const res = await fetch(`${CONFIG.WORKER_BASE}/api/watchlist`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ pin, watchlist: appState.watchlist })
+                    body: JSON.stringify({ pin, watchlists: appState.watchlists })
                 });
                 if (!res.ok) {
                     let msg = `HTTP ${res.status}`;
@@ -1319,14 +1466,14 @@ Signal line = EMA(9) of MACD line</span>
             }
         }
 
-        // Saves watchlist locally, and to cloud if a PIN is set
+        // Saves all watchlists locally, and to cloud if a PIN is set
         function persistWatchlist() {
-            localStorage.setItem('stocks', JSON.stringify(appState.watchlist));
+            saveWatchlistsLocal();
             if (appState.pin) {
                 fetch(`${CONFIG.WORKER_BASE}/api/watchlist`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ pin: appState.pin, watchlist: appState.watchlist })
+                    body: JSON.stringify({ pin: appState.pin, watchlists: appState.watchlists })
                 }).then(res => {
                     if (res.ok) setSyncStatus('Synced', 'ok');
                     else setSyncStatus('Cloud sync failed', 'error');
@@ -1336,7 +1483,7 @@ Signal line = EMA(9) of MACD line</span>
 
         // --- Core Application Loop ---
         async function updateData() {
-            await Promise.all(appState.watchlist.map(async ticker => {
+            await Promise.all(activeWatchlist().map(async ticker => {
                 ensureTickerState(ticker);
                 const tf = getActiveTf(ticker);
                 const key = getTfKey(ticker, tf);
@@ -1391,12 +1538,13 @@ Signal line = EMA(9) of MACD line</span>
             renderUI();
         }
 
-        function buildSignalInnerHTML(comp) {
+        function buildSignalInnerHTML(comp, expanded) {
             const sigClass = comp.signal === 'BUY' ? 'buy' : comp.signal === 'SELL' ? 'sell' : 'hold';
+            const hint = expanded ? 'Tap to collapse ‹' : 'Tap for details & actions ›';
             return `
                 <div class="signal-header">
                     <span class="badge ${sigClass}">${comp.signal}</span>
-                    <span class="signal-expand-hint">Tap for details ›</span>
+                    <span class="signal-expand-hint">${hint}</span>
                 </div>
                 <ul class="signal-reasons">
                     ${(comp.reasons || []).map(r => `<li>${r}</li>`).join('')}
@@ -1725,7 +1873,7 @@ Signal line = EMA(9) of MACD line</span>
         }
 
         function selectAllAlertTickers(select) {
-            if (select) appState.watchlist.forEach(t => selectedAlertTickers.add(t));
+            if (select) activeWatchlist().forEach(t => selectedAlertTickers.add(t));
             else selectedAlertTickers.clear();
             renderAlertsTab();
         }
@@ -1778,13 +1926,13 @@ Signal line = EMA(9) of MACD line</span>
             const container = document.getElementById('alertsView');
             if (!container) return;
 
-            if (!appState.watchlist.length) {
+            if (!activeWatchlist().length) {
                 container.innerHTML = '<div class="info-card">No stocks tracked yet — add one from the Portfolio tab.</div>';
                 updateBulkAlertBar();
                 return;
             }
 
-            const rows = appState.watchlist.map(ticker => {
+            const rows = activeWatchlist().map(ticker => {
                 ensureTickerState(ticker);
                 const data = getTickerData(ticker);
                 let meta = '—';
@@ -1848,14 +1996,14 @@ Signal line = EMA(9) of MACD line</span>
         function _doRenderUI() {
             const container = document.getElementById('watchlist');
             if (!container) return;
-            if(appState.watchlist.length === 0) {
+            if(activeWatchlist().length === 0) {
                 container.innerHTML = '<div class="info-card">No stocks tracked. Add one above.</div>';
                 if (appState.ui.activeTab === 'alerts') renderAlertsTab();
                 return;
             }
             
             let html = '';
-            for (let ticker of appState.watchlist) {
+            for (let ticker of activeWatchlist()) {
                 try {
                     html += renderStockCard(ticker);
                 } catch (e) {
@@ -1873,8 +2021,9 @@ Signal line = EMA(9) of MACD line</span>
             }
 
             container.innerHTML = html;
-            appState.watchlist.forEach(ticker => {
-                if (appState.ui.charts[ticker] && getTickerData(ticker)) {
+            activeWatchlist().forEach(ticker => {
+                // Chart canvas only exists in the DOM while its card is expanded (see toggleCardExpanded)
+                if (appState.ui.cardExpanded[ticker] && appState.ui.charts[ticker] && getTickerData(ticker)) {
                     try { drawChart(ticker); } catch (e) { console.error(`drawChart failed for ${ticker}:`, e); }
                 }
             });
@@ -1959,6 +2108,7 @@ Signal line = EMA(9) of MACD line</span>
 
             const ui = appState.ui;
             const inds = appState.indicators[ticker];
+            const expanded = !!ui.cardExpanded[ticker];
 
             let alertsHtml = (appState.alerts[ticker] || []).map(a => `
                 <div class="active-alert">
@@ -1978,11 +2128,6 @@ Signal line = EMA(9) of MACD line</span>
                     </div>`).join('');
             }
 
-            let signalHtml = `
-                <div class="signal-panel" id="signal-panel-${ticker}">
-                    ${buildSignalInnerHTML(comp)}
-                </div>`;
-
             return `
                 <div class="stock-card sig-${sigClass}" data-ticker="${ticker}">
                     <div class="card-inner">
@@ -2001,11 +2146,12 @@ Signal line = EMA(9) of MACD line</span>
                         </div>
                     </div>
 
-                    <!-- Signal (tap to expand reasons) -->
-                    <div class="signal-panel" id="signal-panel-${ticker}" onclick="this.classList.toggle('expanded')">
-                        ${buildSignalInnerHTML(comp)}
+                    <!-- Signal (tap to expand — also reveals chart/news/alerts/remove actions) -->
+                    <div class="signal-panel${expanded ? ' expanded' : ''}" id="signal-panel-${ticker}" onclick="toggleCardExpanded('${ticker}')">
+                        ${buildSignalInnerHTML(comp, expanded)}
                     </div>
 
+                    ${!expanded ? '' : `
                     <!-- Panel: CHART -->
                     <div class="panel chart-container ${ui.charts[ticker] ? 'active' : ''}">
                         <div class="tf-row">
@@ -2079,6 +2225,7 @@ Signal line = EMA(9) of MACD line</span>
                         <button class="icon-btn ${ui.alerts[ticker]?'active':''}" onclick="toggleUI('${ticker}', 'panel', 'alerts')" title="Alerts">🔔</button>
                         <button class="icon-btn" onclick="deleteStock('${ticker}')" title="Remove">✕</button>
                     </div>
+                    `}
                 </div>
             `;
         }
@@ -2590,6 +2737,14 @@ Signal line = EMA(9) of MACD line</span>
             if(leg)leg.innerHTML=items.map(it=>`<span class="legend-item"><span class="legend-dot" style="background:${it.c}"></span><span class="legend-name">${it.n}</span><span class="legend-value">${it.v}</span></span>`).join('');
         }
         // --- App Interactions ---
+        // Expands/collapses a whole card: the action icon row (chart/news/alerts/remove) and
+        // any open panels only render while expanded, so a collapsed card is just its summary —
+        // no risk of the action row getting clipped at the bottom of a long list.
+        function toggleCardExpanded(ticker) {
+            appState.ui.cardExpanded[ticker] = !appState.ui.cardExpanded[ticker];
+            renderUI();
+        }
+
         async function toggleUI(ticker, type, key) {
             if (type === 'panel') {
                 let state = appState.ui[key][ticker];
@@ -2642,7 +2797,7 @@ Signal line = EMA(9) of MACD line</span>
                 return;
             }
 
-            if (appState.watchlist.includes(val)) {
+            if (activeWatchlist().includes(val)) {
                 input.style.borderColor = 'var(--hold-color)';
                 input.placeholder = `${val} already added`;
                 setTimeout(() => {
@@ -2652,7 +2807,7 @@ Signal line = EMA(9) of MACD line</span>
                 return;
             }
 
-            appState.watchlist.unshift(val);
+            activeWatchlist().unshift(val);
             persistWatchlist();
             input.value = '';
             document.getElementById('watchlist').innerHTML = '<div class="info-card">Fetching...</div>';
@@ -2660,7 +2815,7 @@ Signal line = EMA(9) of MACD line</span>
         }
 
         function deleteStock(ticker) {
-            appState.watchlist = appState.watchlist.filter(t => t !== ticker);
+            appState.watchlists[appState.activeList] = activeWatchlist().filter(t => t !== ticker);
             // Delete all cached timeframes for this ticker
             Object.keys(CONFIG.TIMEFRAMES).forEach(tf => {
                 delete appState.dataCache[getTfKey(ticker, tf)];
@@ -2714,6 +2869,8 @@ Signal line = EMA(9) of MACD line</span>
         document.getElementById('tickerInput').addEventListener('keydown', (e) => {
             if (e.key === 'Enter') addStock();
         });
+        renderListSwitcher();
+        document.getElementById('listSwitcher').style.display = 'flex'; // Portfolio is the default active tab
         if (appState.pin) loadAlertsFromServer().then(renderUI);
         updateData();
         setInterval(updateData, CONFIG.REFRESH_MS);
