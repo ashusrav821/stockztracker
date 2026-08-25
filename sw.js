@@ -1,4 +1,4 @@
-const CACHE_NAME = 'stock-tracker-v4';
+const CACHE_NAME = 'stock-tracker-v5';
 const urlsToCache = [
   './index.html',
   './manifest.json',
