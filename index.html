@@ -1502,6 +1502,37 @@ Signal line = EMA(9) of MACD line</span>
             document.querySelectorAll('.sort-select').forEach(el => { el.value = mode; });
             renderUI();
             if (appState.ui.activeTab === 'alerts') renderAlertsTab();
+            syncPrefsToServer();
+        }
+
+        // Pushes current preferences (currently just sortMode; extensible) to the cloud.
+        // Fire-and-forget, matching the pattern used for watchlist/alert sync — the local copy
+        // remains the source of truth for the UI regardless of network outcome.
+        function syncPrefsToServer() {
+            if (!appState.pin) return;
+            fetch(`${CONFIG.WORKER_BASE}/api/prefs`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ pin: appState.pin, prefs: { sortMode: appState.ui.sortMode } }),
+            }).catch(() => {}); // best-effort
+        }
+
+        // Pulls synced preferences from the cloud and applies them if different from what's
+        // already local — used on load/PIN-switch so a second device picks up your sort choice.
+        async function loadPrefsFromServer() {
+            if (!appState.pin) return false;
+            try {
+                const res = await fetch(`${CONFIG.WORKER_BASE}/api/prefs?pin=${encodeURIComponent(appState.pin)}`);
+                if (!res.ok) return false;
+                const data = await res.json();
+                if (!data.prefs || typeof data.prefs !== 'object') return false;
+                if (data.prefs.sortMode && data.prefs.sortMode !== appState.ui.sortMode) {
+                    appState.ui.sortMode = data.prefs.sortMode;
+                    localStorage.setItem('sortMode', data.prefs.sortMode);
+                    document.querySelectorAll('.sort-select').forEach(el => { el.value = data.prefs.sortMode; });
+                }
+                return true;
+            } catch (e) { return false; }
         }
 
         window.myCharts = {};
@@ -1783,7 +1814,8 @@ Signal line = EMA(9) of MACD line</span>
                 setSyncStatus('Loaded watchlists from cloud', 'ok');
                 document.getElementById('watchlist').innerHTML = '<div class="info-card">Fetching...</div>';
                 renderListSwitcher();
-                appState.cloudSynced = await loadAlertsFromServer();
+                const [alertsOk] = await Promise.all([loadAlertsFromServer(), loadPrefsFromServer()]);
+                appState.cloudSynced = alertsOk;
                 refreshSyncBadges();
                 await updateData(true);
             } catch(e) {
@@ -3657,13 +3689,20 @@ Signal line = EMA(9) of MACD line</span>
 
         if (_hadExistingPin) {
             // Returning user — pull whatever's already synced (rules' armed/lastTriggered state
-            // lives server-side) rather than overwriting the cloud with local state.
-            loadAlertsFromServer().then(success => { appState.cloudSynced = success; refreshSyncBadges(); renderUI(); });
+            // lives server-side, and so does sort preference) rather than overwriting the cloud
+            // with local state.
+            Promise.all([loadAlertsFromServer(), loadPrefsFromServer()]).then(([alertsOk]) => {
+                appState.cloudSynced = alertsOk;
+                refreshSyncBadges();
+                renderUI();
+                if (appState.ui.activeTab === 'alerts') renderAlertsTab();
+            });
         } else {
             // First-ever launch: push the current local state to the freshly generated PIN so
             // cloud sync — and therefore working alerts — is active immediately, no setup required.
             persistWatchlist();
             syncAlertsToServer();
+            syncPrefsToServer();
         }
         updateData();
         setInterval(() => updateData(true), CONFIG.REFRESH_MS);
