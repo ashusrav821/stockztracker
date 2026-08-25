@@ -211,6 +211,18 @@
         }
         .sync-row button.primary { background: var(--accent); color: white; border-color: transparent; }
         .sync-status { font-size: 0.7rem; color: var(--text-sub); min-height: 12px; margin-top: 3px; }
+
+        .sync-badge {
+            font-size: 0.72rem;
+            font-weight: 700;
+            padding: 8px 10px;
+            border-radius: 10px;
+            margin-top: 8px;
+            cursor: pointer;
+        }
+        .sync-badge.unsynced { background: rgba(255,159,10,0.14); color: var(--hold-color); }
+        .sync-badge.partial { background: var(--accent-dim); color: var(--accent); }
+        .sync-badge.synced { background: rgba(52,199,89,0.14); color: var(--buy-color); cursor: default; }
         .sync-status.error { color: var(--sell-color); }
         .sync-status.ok { color: var(--buy-color); }
 
@@ -341,6 +353,19 @@
             cursor: pointer;
         }
         .chip-move:disabled { opacity: 0.3; cursor: default; }
+
+        /* Sort control */
+        .sort-bar { display: none; padding: 6px 12px 0; }
+        .sort-select {
+            width: 100%;
+            padding: 7px 10px;
+            font-size: 0.8rem;
+            font-weight: 600;
+            background: var(--input-bg);
+            border: 1px solid var(--input-border);
+            border-radius: 10px;
+            color: var(--text-main);
+        }
 
         /* Filter bar */
         .filter-bar {
@@ -914,6 +939,7 @@
                 <button style="flex:1;" id="installBtn" onclick="installApp()">📲 Install App</button>
             </div>
             <div class="sync-status" id="installStatus"></div>
+            <div class="sync-badge-slot" id="syncBadgeDrawer"></div>
         </div>
     </header>
 
@@ -924,6 +950,8 @@
     </div>
 
     <div class="list-switcher" id="listSwitcher"></div>
+
+    <div class="sort-bar" id="sortBarPortfolio"></div>
 
     <div class="filter-bar" id="filterBar">
         <input type="text" id="filterInput" placeholder="🔍  Filter stocks…" autocomplete="off" autocorrect="off" autocapitalize="characters" spellcheck="false" oninput="filterWatchlist(this.value)">
@@ -1039,6 +1067,7 @@
             const tabGuide = document.getElementById('tab-guide');
             const tabAlerts = document.getElementById('tab-alerts');
             const filterBar = document.getElementById('filterBar');
+            const sortBarPortfolio = document.getElementById('sortBarPortfolio');
             const listSwitcher = document.getElementById('listSwitcher');
 
             appState.ui.activeTab = tab;
@@ -1048,6 +1077,7 @@
             alertsTab.style.display = tab === 'alerts' ? 'block' : 'none';
             const showChrome = tab === 'portfolio' || tab === 'alerts'; // both operate on the active list
             if (filterBar) filterBar.style.display = tab === 'portfolio' ? 'flex' : 'none';
+            if (sortBarPortfolio) sortBarPortfolio.style.display = tab === 'portfolio' ? 'block' : 'none';
             if (listSwitcher) listSwitcher.style.display = showChrome ? 'flex' : 'none';
 
             tabPortfolio.classList.toggle('active', tab === 'portfolio');
@@ -1076,11 +1106,12 @@
 
             const chips = names.map((name, i) => {
                 const esc = name.replace(/'/g, "\\'");
+                const safeName = escapeHtml(name);
                 if (reordering) {
                     return `
                         <span class="list-chip reorder-chip">
                             <button class="chip-move" ${i === 0 ? 'disabled' : ''} onclick="moveList('${esc}', -1)">‹</button>
-                            <span class="list-chip-label">${name}</span>
+                            <span class="list-chip-label">${safeName}</span>
                             <button class="chip-move" ${i === names.length - 1 ? 'disabled' : ''} onclick="moveList('${esc}', 1)">›</button>
                         </span>`;
                 }
@@ -1088,7 +1119,7 @@
                 const count = appState.watchlists[name].length;
                 return `
                     <button class="list-chip${isActive ? ' active' : ''}" onclick="switchList('${esc}')">
-                        ${name} <span class="list-chip-count">${count}</span>
+                        ${safeName} <span class="list-chip-count">${count}</span>
                         <span class="list-chip-edit" onclick="event.stopPropagation();renameList('${esc}')">✏️</span>
                         ${names.length > 1 ? `<span class="list-chip-del" onclick="event.stopPropagation();deleteList('${esc}')">✕</span>` : ''}
                     </button>`;
@@ -1171,9 +1202,10 @@
         function deleteList(name) {
             const names = Object.keys(appState.watchlists);
             if (names.length <= 1) { alert("Can't delete your only watchlist"); return; }
-            const count = appState.watchlists[name].length;
+            const tickersInList = appState.watchlists[name].slice();
+            const count = tickersInList.length;
             const confirmMsg = count > 0
-                ? `Delete "${name}"? This removes ${count} ticker${count === 1 ? '' : 's'} from this list (your alerts for those tickers stay intact if they're in another list).`
+                ? `Delete "${name}"? This removes ${count} ticker${count === 1 ? '' : 's'} from this list. Alerts for any of them not in another list will also be removed.`
                 : `Delete "${name}"?`;
             if (!confirm(confirmMsg)) return;
 
@@ -1181,12 +1213,43 @@
             if (appState.activeList === name) {
                 appState.activeList = Object.keys(appState.watchlists)[0];
             }
+            tickersInList.forEach(purgeOrphanedTickerState);
             saveWatchlistsLocal();
             persistWatchlist();
             renderListSwitcher();
             document.getElementById('watchlist').innerHTML = '<div class="info-card">Fetching...</div>';
             updateData();
             if (appState.ui.activeTab === 'alerts') renderAlertsTab();
+        }
+
+        // True if `ticker` still appears in at least one watchlist (any list, not just the active one).
+        function tickerExistsInAnyList(ticker) {
+            return Object.values(appState.watchlists).some(list => list.includes(ticker));
+        }
+
+        // Cleans up ALL per-ticker state once a ticker no longer belongs to any watchlist —
+        // cached price data, UI panel toggles, indicator settings, and critically, its alert
+        // rules. Without this, a removed ticker's alerts kept living in appState.alerts and
+        // stayed synced to the server, where the Cron Trigger would keep evaluating and firing
+        // push notifications for them forever, with no way to see or delete them from the UI
+        // (the Alerts tab only ever lists tickers from your current watchlists).
+        function purgeOrphanedTickerState(ticker) {
+            if (tickerExistsInAnyList(ticker)) return; // still referenced elsewhere — keep its state
+
+            Object.keys(CONFIG.TIMEFRAMES).forEach(tf => { delete appState.dataCache[getTfKey(ticker, tf)]; });
+            delete appState.errors[ticker];
+            delete appState.timeframe[ticker];
+            delete appState.indicators[ticker];
+            delete appState.ui.charts[ticker];
+            delete appState.ui.news[ticker];
+            delete appState.ui.alerts[ticker];
+            delete appState.ui.cardExpanded[ticker];
+
+            if (appState.alerts[ticker]) {
+                delete appState.alerts[ticker];
+                localStorage.setItem('alerts', JSON.stringify(appState.alerts));
+                syncAlertsToServer(); // removes these rules server-side too, so the cron stops evaluating them
+            }
         }
 
         // Filter rendered cards by ticker — pure DOM show/hide, no re-render.
@@ -1333,16 +1396,30 @@ Signal line = EMA(9) of MACD line</span>
             return lists;
         }
 
+        // Auto-generates a sync PIN on first-ever launch, so cloud sync — and therefore alerts
+        // actually firing when the app is closed — works with zero manual setup. The PIN is
+        // still visible/editable in the sync drawer for anyone who wants to sync a second device.
+        const _hadExistingPin = !!localStorage.getItem('syncPin');
+        function getOrCreatePin() {
+            let pin = localStorage.getItem('syncPin');
+            if (pin) return pin;
+            pin = String(Math.floor(100000 + Math.random() * 900000)); // 6 digits
+            localStorage.setItem('syncPin', pin);
+            return pin;
+        }
+
         let appState = {
             watchlists: migrateToMultiWatchlist(),   // { "Tech": ["AAPL","MSFT"], "Dividends": [...] }
             activeList: localStorage.getItem('activeList') || null, // set below once watchlists is known
             alerts: JSON.parse(localStorage.getItem('alerts')) || {},
             indicators: JSON.parse(localStorage.getItem('indicators')) || {},
-            ui: { charts: {}, news: {}, alerts: {}, cardExpanded: {}, activeTab: 'portfolio', reorderingLists: false, alertsSubView: 'manage' },
+            ui: { charts: {}, news: {}, alerts: {}, cardExpanded: {}, activeTab: 'portfolio', reorderingLists: false, alertsSubView: 'manage', sortMode: localStorage.getItem('sortMode') || 'manual' },
             dataCache: {},        // keyed by "TICKER:TF" e.g. "AAPL:1D"
             newsCache: {},
             errors: {},
-            pin: localStorage.getItem('syncPin') || '',
+            pin: getOrCreatePin(),
+            cloudSynced: false,   // becomes true only after a cloud save actually succeeds — see persistWatchlist/syncAlertsToServer
+            pushEnabled: false,   // whether THIS device has a registered push subscription — set at init/enable time
             timeframe: {},        // per-ticker active timeframe key, e.g. { AAPL: '1D' }
         };
         // Guard against a stale activeList pointing at a list that no longer exists (e.g. deleted
@@ -1355,6 +1432,13 @@ Signal line = EMA(9) of MACD line</span>
         // Single accessor for "the array of tickers in the currently active list" — every place
         // that used to read/write appState.watchlist directly now goes through this, so switching
         // lists doesn't require touching rendering/data logic at all.
+        // Escapes text rendered as HTML content — applied to user-typed list names and
+        // external data (ticker-search company names from Yahoo) before insertion via innerHTML,
+        // since neither is guaranteed free of HTML-special characters.
+        function escapeHtml(str) {
+            return String(str).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+        }
+
         function activeWatchlist() {
             if (!appState.watchlists[appState.activeList]) appState.watchlists[appState.activeList] = [];
             return appState.watchlists[appState.activeList];
@@ -1363,6 +1447,61 @@ Signal line = EMA(9) of MACD line</span>
         function saveWatchlistsLocal() {
             localStorage.setItem('watchlists', JSON.stringify(appState.watchlists));
             localStorage.setItem('activeList', appState.activeList);
+        }
+
+        // Returns today's % change for a ticker from cached price data, or null if not yet
+        // loaded / not enough history — used only for sorting, never shown as a value itself.
+        function todaysChangePct(ticker) {
+            const data = getTickerData(ticker);
+            if (!data || !Array.isArray(data.prices) || data.prices.length < 2) return null;
+            const prices = data.prices;
+            const current = prices[prices.length - 1];
+            const prev = prices[prices.length - 2];
+            if (!prev) return null;
+            return ((current - prev) / prev) * 100;
+        }
+
+        // Display-order view of the active list — never mutates appState.watchlists, so switching
+        // sort modes is non-destructive and 'manual' always returns you to your original ordering.
+        function getSortedWatchlist() {
+            const list = activeWatchlist().slice();
+            const mode = appState.ui.sortMode || 'manual';
+            if (mode === 'manual') return list;
+
+            if (mode === 'name-asc') return list.sort((a, b) => a.localeCompare(b));
+            if (mode === 'name-desc') return list.sort((a, b) => b.localeCompare(a));
+
+            if (mode === 'change-desc' || mode === 'change-asc') {
+                const withPct = list.map(t => ({ t, pct: todaysChangePct(t) }));
+                withPct.sort((a, b) => {
+                    if (a.pct === null && b.pct === null) return 0;
+                    if (a.pct === null) return 1;  // tickers without data yet always sort last
+                    if (b.pct === null) return -1;
+                    return mode === 'change-desc' ? b.pct - a.pct : a.pct - b.pct;
+                });
+                return withPct.map(x => x.t);
+            }
+            return list;
+        }
+
+        function getSortSelectHTML(idSuffix) {
+            const mode = appState.ui.sortMode || 'manual';
+            return `
+                <select class="sort-select" id="sortSelect-${idSuffix}" onchange="setSortMode(this.value)">
+                    <option value="manual" ${mode === 'manual' ? 'selected' : ''}>Sort: Manual order</option>
+                    <option value="name-asc" ${mode === 'name-asc' ? 'selected' : ''}>Sort: Name A→Z</option>
+                    <option value="name-desc" ${mode === 'name-desc' ? 'selected' : ''}>Sort: Name Z→A</option>
+                    <option value="change-desc" ${mode === 'change-desc' ? 'selected' : ''}>Sort: % Up → Down</option>
+                    <option value="change-asc" ${mode === 'change-asc' ? 'selected' : ''}>Sort: % Down → Up</option>
+                </select>`;
+        }
+
+        function setSortMode(mode) {
+            appState.ui.sortMode = mode;
+            localStorage.setItem('sortMode', mode);
+            document.querySelectorAll('.sort-select').forEach(el => { el.value = mode; });
+            renderUI();
+            if (appState.ui.activeTab === 'alerts') renderAlertsTab();
         }
 
         window.myCharts = {};
@@ -1600,6 +1739,24 @@ Signal line = EMA(9) of MACD line</span>
             el.className = 'sync-status' + (type ? ' ' + type : '');
         }
 
+        // Reflects the real state of alert delivery in plain language — not just "is a PIN set"
+        // (which is now always true, auto-generated) but whether it's actually confirmed synced
+        // to the cloud AND whether this specific device has push enabled, since both are required
+        // for an alert to actually reach you when the app is closed.
+        function getSyncBadgeHTML() {
+            if (!appState.cloudSynced) {
+                return `<div class="sync-badge unsynced" onclick="toggleSyncDrawer()">⚠️ Not yet confirmed synced to cloud — tap ☁️ to retry</div>`;
+            }
+            if (!appState.pushEnabled) {
+                return `<div class="sync-badge partial" onclick="toggleSyncDrawer()">🔔 Cloud sync active — tap ☁️ to enable push on this device</div>`;
+            }
+            return `<div class="sync-badge synced">✅ Cloud alerts active — will fire even when the app is closed</div>`;
+        }
+
+        function refreshSyncBadges() {
+            document.querySelectorAll('.sync-badge-slot').forEach(el => { el.innerHTML = getSyncBadgeHTML(); });
+        }
+
         function getPin() {
             const val = document.getElementById('pinInput').value.trim();
             return val;
@@ -1626,8 +1783,9 @@ Signal line = EMA(9) of MACD line</span>
                 setSyncStatus('Loaded watchlists from cloud', 'ok');
                 document.getElementById('watchlist').innerHTML = '<div class="info-card">Fetching...</div>';
                 renderListSwitcher();
-                await loadAlertsFromServer();
-                await updateData();
+                appState.cloudSynced = await loadAlertsFromServer();
+                refreshSyncBadges();
+                await updateData(true);
             } catch(e) {
                 setSyncStatus('Failed to load: ' + e.message, 'error');
             }
@@ -1651,6 +1809,8 @@ Signal line = EMA(9) of MACD line</span>
                 }
                 appState.pin = pin;
                 localStorage.setItem('syncPin', pin);
+                appState.cloudSynced = true;
+                refreshSyncBadges();
                 setSyncStatus('Saved to cloud', 'ok');
             } catch(e) {
                 setSyncStatus('Failed to save: ' + e.message, 'error');
@@ -1666,18 +1826,38 @@ Signal line = EMA(9) of MACD line</span>
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ pin: appState.pin, watchlists: appState.watchlists })
                 }).then(res => {
+                    appState.cloudSynced = res.ok;
                     if (res.ok) setSyncStatus('Synced', 'ok');
                     else setSyncStatus('Cloud sync failed', 'error');
-                }).catch(() => setSyncStatus('Cloud sync failed (offline?)', 'error'));
+                    refreshSyncBadges();
+                }).catch(() => {
+                    appState.cloudSynced = false;
+                    setSyncStatus('Cloud sync failed (offline?)', 'error');
+                    refreshSyncBadges();
+                });
             }
         }
 
         // --- Core Application Loop ---
-        async function updateData() {
+        // forceRefresh=true always re-fetches (used by the 60s auto-refresh timer and manual
+        // pull-to-refresh, where fresh prices are the whole point). Otherwise, a ticker whose
+        // cached data is still under FRESH_MS old is skipped entirely — this matters a lot now
+        // that switching between watchlists calls updateData() too: two lists sharing a ticker
+        // no longer force a redundant network round-trip just because you switched tabs.
+        const FRESH_MS = 30000;
+        async function updateData(forceRefresh = false) {
             await Promise.all(activeWatchlist().map(async ticker => {
                 ensureTickerState(ticker);
                 const tf = getActiveTf(ticker);
                 const key = getTfKey(ticker, tf);
+
+                const cached = appState.dataCache[key];
+                const isFresh = cached && cached.fetchedAt && (Date.now() - cached.fetchedAt) < FRESH_MS;
+                if (!forceRefresh && isFresh) {
+                    try { evaluateAlerts(ticker); } catch (e) { console.error(`evaluateAlerts failed for ${ticker}:`, e); }
+                    renderUI();
+                    return;
+                }
 
                 try {
                     const data = await fetchStockData(ticker, tf);
@@ -1685,6 +1865,7 @@ Signal line = EMA(9) of MACD line</span>
                         throw new Error('No price data returned');
                     }
                     data.computed = computeIndicatorSet(data.prices, data.ohlc);
+                    data.fetchedAt = Date.now();
                     appState.dataCache[key] = data;
                     delete appState.errors[ticker];
                 } catch(e) {
@@ -1840,7 +2021,7 @@ Signal line = EMA(9) of MACD line</span>
                 indicator.style.transform = `translateY(${THRESHOLD}px)`;
                 indicator.style.opacity = '1';
                 try {
-                    await updateData();
+                    await updateData(true);
                     if (appState.ui.activeTab === 'alerts') await loadAlertsFromServer();
                 } catch (e) {
                     console.error('Pull-to-refresh failed:', e);
@@ -2008,8 +2189,8 @@ Signal line = EMA(9) of MACD line</span>
         }
 
         async function enablePushAlerts() {
-            if (!appState.pin) {
-                setPushStatus('Set a sync PIN above first — alerts are tied to it', 'error');
+            if (!appState.cloudSynced) {
+                setPushStatus('Cloud sync not confirmed yet — tap Save above first, or wait a moment and retry', 'error');
                 return;
             }
             if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
@@ -2046,8 +2227,28 @@ Signal line = EMA(9) of MACD line</span>
                 });
                 if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
-                setPushStatus('Watch alerts enabled on this device ✓', 'ok');
+                appState.pushEnabled = true;
                 document.getElementById('pushBtn').textContent = '🔔 Watch Alerts Enabled';
+                refreshSyncBadges();
+
+                // Confirm the full pipeline actually works end-to-end, right now, rather than
+                // leaving it to chance whether a real alert ever successfully arrives later.
+                setPushStatus('Enabled — sending a test notification...', 'ok');
+                try {
+                    const testRes = await fetch(`${CONFIG.WORKER_BASE}/api/push-test`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ pin: appState.pin, subscription: sub.toJSON() }),
+                    });
+                    const testData = await testRes.json().catch(() => ({}));
+                    if (testRes.ok && testData.sent) {
+                        setPushStatus('Watch alerts enabled ✓ — check for the test notification', 'ok');
+                    } else {
+                        setPushStatus('Enabled, but the test notification failed to send — try again or check VAPID setup', 'error');
+                    }
+                } catch (e) {
+                    setPushStatus('Enabled, but could not confirm delivery (offline?)', 'error');
+                }
             } catch (e) {
                 setPushStatus('Failed: ' + e.message, 'error');
             }
@@ -2064,18 +2265,24 @@ Signal line = EMA(9) of MACD line</span>
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ pin: appState.pin, rules: flat }),
-            }).catch(() => {}); // best-effort; local copy remains the source of truth for the UI
+            }).then(res => {
+                appState.cloudSynced = res.ok;
+                refreshSyncBadges();
+            }).catch(() => {
+                appState.cloudSynced = false;
+                refreshSyncBadges();
+            });
         }
 
         // Pulls server-side rules (which carry armed/lastTriggered state maintained by the cron
         // evaluator) back into appState.alerts, keyed by ticker, on load / after PIN sync.
         async function loadAlertsFromServer() {
-            if (!appState.pin) return;
+            if (!appState.pin) return false;
             try {
                 const res = await fetch(`${CONFIG.WORKER_BASE}/api/alerts?pin=${encodeURIComponent(appState.pin)}`);
-                if (!res.ok) return;
+                if (!res.ok) return false;
                 const data = await res.json();
-                if (!Array.isArray(data.rules)) return;
+                if (!Array.isArray(data.rules)) return false;
                 const byTicker = {};
                 data.rules.forEach(r => {
                     if (!byTicker[r.ticker]) byTicker[r.ticker] = [];
@@ -2083,7 +2290,8 @@ Signal line = EMA(9) of MACD line</span>
                 });
                 appState.alerts = byTicker;
                 localStorage.setItem('alerts', JSON.stringify(appState.alerts));
-            } catch (e) { /* best-effort */ }
+                return true;
+            } catch (e) { return false; /* best-effort */ }
         }
 
         // Core of adding a preset/custom alert — mutates state only, no save/sync/render side
@@ -2297,7 +2505,7 @@ Signal line = EMA(9) of MACD line</span>
                 return;
             }
 
-            const rows = activeWatchlist().map(ticker => {
+            const rows = getSortedWatchlist().map(ticker => {
                 ensureTickerState(ticker);
                 const data = getTickerData(ticker);
                 let meta = '—';
@@ -2336,10 +2544,11 @@ Signal line = EMA(9) of MACD line</span>
                         <button class="preset-btn" onclick="selectAllAlertTickers(false)">Clear</button>
                         <span class="alerts-select-count" id="alertsSelectCount">${selectedAlertTickers.size} selected</span>
                     </div>
+                    <div style="margin-top:8px;">${getSortSelectHTML('alerts')}</div>
                     <div style="font-size:0.7rem;color:var(--text-sub);margin-top:8px;">
-                        Tap a stock to select it, then use the bar below to apply an alert to everything you've picked.<br>
-                        ${appState.pin ? '🔔 Alerts sync to your PIN and evaluate in the cloud, even when the app is closed.' : '⚠️ Set a sync PIN (☁️ above) so alerts can be checked while the app is closed.'}
+                        Tap a stock to select it, then use the bar below to apply an alert to everything you've picked.
                     </div>
+                    <div class="sync-badge-slot">${getSyncBadgeHTML()}</div>
                 </div>
                 <div class="alerts-ticker-list">${rows}</div>
             `;
@@ -2350,8 +2559,8 @@ Signal line = EMA(9) of MACD line</span>
         // opened (history is cheap and small — capped at 50 entries server-side) rather than
         // caching locally, so it always reflects what the cron evaluator has actually fired.
         async function renderAlertHistoryView(container, subViewTabs) {
-            if (!appState.pin) {
-                container.innerHTML = subViewTabs + '<div class="info-card">⚠️ Set a sync PIN (☁️ above) to see alert history — it\'s tracked server-side alongside the cloud evaluator.</div>';
+            if (!appState.cloudSynced) {
+                container.innerHTML = subViewTabs + '<div class="info-card">⚠️ Not yet confirmed synced to cloud — tap ☁️ above to retry. History is tracked server-side alongside the cloud evaluator.</div>';
                 return;
             }
 
@@ -2376,8 +2585,8 @@ Signal line = EMA(9) of MACD line</span>
                     return `
                         <div class="history-item">
                             <div class="history-item-main">
-                                <span class="history-item-ticker">${h.ticker}</span>
-                                <span class="history-item-msg">${h.message}</span>
+                                <span class="history-item-ticker">${escapeHtml(h.ticker)}</span>
+                                <span class="history-item-msg">${escapeHtml(h.message)}</span>
                             </div>
                             <span class="history-item-time">${timeStr}</span>
                         </div>`;
@@ -2413,7 +2622,7 @@ Signal line = EMA(9) of MACD line</span>
             }
             
             let html = '';
-            for (let ticker of activeWatchlist()) {
+            for (let ticker of getSortedWatchlist()) {
                 try {
                     html += renderStockCard(ticker);
                 } catch (e) {
@@ -2627,9 +2836,7 @@ Signal line = EMA(9) of MACD line</span>
                             <input type="number" id="alt-val-${ticker}" placeholder="Value">
                             <button onclick="addCustomAlert('${ticker}')">Set</button>
                         </div>
-                        <div style="font-size:0.7rem;color:var(--text-sub);margin-top:6px;">
-                            ${appState.pin ? '🔔 Alerts sync to your PIN and evaluate in the cloud, even when the app is closed.' : '⚠️ Set a sync PIN (☁️ above) so alerts can be checked while the app is closed.'}
-                        </div>
+                        <div class="sync-badge-slot">${getSyncBadgeHTML()}</div>
                     </div>
 
                     <!-- Icon-only action bar -->
@@ -3228,8 +3435,8 @@ Signal line = EMA(9) of MACD line</span>
             }
             dropdown.innerHTML = results.map(r => `
                 <div class="ticker-search-item" onmousedown="event.preventDefault()" onclick="selectTickerSearchResult('${r.symbol.replace(/'/g,"\\'")}')">
-                    <span class="ticker-search-symbol">${r.symbol}${r.exchange ? ' · ' + r.exchange : ''}</span>
-                    <span class="ticker-search-name">${r.name}</span>
+                    <span class="ticker-search-symbol">${escapeHtml(r.symbol)}${r.exchange ? ' · ' + escapeHtml(r.exchange) : ''}</span>
+                    <span class="ticker-search-name">${escapeHtml(r.name)}</span>
                 </div>`).join('');
             dropdown.style.display = 'block';
         }
@@ -3288,12 +3495,7 @@ Signal line = EMA(9) of MACD line</span>
 
         function deleteStock(ticker) {
             appState.watchlists[appState.activeList] = activeWatchlist().filter(t => t !== ticker);
-            // Delete all cached timeframes for this ticker
-            Object.keys(CONFIG.TIMEFRAMES).forEach(tf => {
-                delete appState.dataCache[getTfKey(ticker, tf)];
-            });
-            delete appState.errors[ticker];
-            delete appState.timeframe[ticker];
+            purgeOrphanedTickerState(ticker);
             persistWatchlist();
             renderUI();
         }
@@ -3343,16 +3545,32 @@ Signal line = EMA(9) of MACD line</span>
         });
         renderListSwitcher();
         document.getElementById('listSwitcher').style.display = 'flex'; // Portfolio is the default active tab
-        if (appState.pin) loadAlertsFromServer().then(renderUI);
-        updateData();
-        setInterval(updateData, CONFIG.REFRESH_MS);
+        document.getElementById('sortBarPortfolio').innerHTML = getSortSelectHTML('portfolio');
+        document.getElementById('sortBarPortfolio').style.display = 'block';
+        document.getElementById('pinInput').value = appState.pin; // always set now (auto-generated if new)
+        document.getElementById('syncBadgeDrawer').innerHTML = getSyncBadgeHTML();
 
-        // Reflect existing push subscription state in the button, if already enabled on this device
+        if (_hadExistingPin) {
+            // Returning user — pull whatever's already synced (rules' armed/lastTriggered state
+            // lives server-side) rather than overwriting the cloud with local state.
+            loadAlertsFromServer().then(success => { appState.cloudSynced = success; refreshSyncBadges(); renderUI(); });
+        } else {
+            // First-ever launch: push the current local state to the freshly generated PIN so
+            // cloud sync — and therefore working alerts — is active immediately, no setup required.
+            persistWatchlist();
+            syncAlertsToServer();
+        }
+        updateData();
+        setInterval(() => updateData(true), CONFIG.REFRESH_MS);
+
+        // Reflect existing push subscription state, if already enabled on this device
         if ('serviceWorker' in navigator && 'PushManager' in window) {
             navigator.serviceWorker.ready.then(reg => reg.pushManager.getSubscription()).then(sub => {
                 if (sub) {
+                    appState.pushEnabled = true;
                     const btn = document.getElementById('pushBtn');
                     if (btn) btn.textContent = '🔔 Watch Alerts Enabled';
+                    refreshSyncBadges();
                 }
             }).catch(() => {});
         }
