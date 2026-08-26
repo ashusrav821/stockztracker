@@ -2275,6 +2275,9 @@ Signal line = EMA(9) of MACD line</span>
             containers.forEach(container => {
                 container.addEventListener('touchstart', (e) => {
                     if (refreshing || container.style.display === 'none' || container.scrollTop > 0) { pulling = false; return; }
+                    // The chart handles its own vertical gesture (price-axis panning), so a drag
+                    // starting inside it must not also arm pull-to-refresh.
+                    if (e.target.closest('.canvas-wrapper, .chart-container')) { pulling = false; return; }
                     active = container;
                     startX = e.touches[0].clientX;
                     startY = e.touches[0].clientY;
@@ -2338,6 +2341,14 @@ Signal line = EMA(9) of MACD line</span>
             }
 
             container.addEventListener('touchstart', (e) => {
+                // Chart canvases and control rows are descendants of the card, so their touch
+                // events bubble here. Without this exclusion, horizontally panning a chart on
+                // mobile would ALSO drag the card sideways toward delete — two gestures fighting
+                // over the same drag. The chart owns its own pan/zoom handling.
+                if (e.target.closest('.canvas-wrapper, .chart-container, .actions, .alert-form, .indicator-toggles, .tf-row, .zoom-row')) {
+                    activeFg = null;
+                    return;
+                }
                 const cardEl = e.target.closest('.stock-card');
                 if (!cardEl) return;
                 const ticker = cardEl.dataset.ticker;
@@ -3150,6 +3161,25 @@ Signal line = EMA(9) of MACD line</span>
         // yZoomState[ticker] = { padMultiplier: 1.0 } — manual override of the price-axis auto-fit padding
         const zoomState = {};
         const yZoomState = {};
+        // yPanState[ticker] = { offset: 0 } — vertical shift of the price window, as a fraction
+        // of the visible price range. Positive = view moves toward higher prices.
+        const yPanState = {};
+
+        // Mobile browsers emit synthetic mouse events (mousedown/mousemove/mouseup) shortly
+        // after every touch. Without this guard, a tap on a phone would spuriously enter the
+        // desktop drag path. Lives at file scope so it survives the canvas being cloned and
+        // replaced on each redraw.
+        let _lastTouchAt = 0;
+        const SYNTHETIC_MOUSE_WINDOW_MS = 700;
+        function isSyntheticMouseEvent() {
+            return Date.now() - _lastTouchAt < SYNTHETIC_MOUSE_WINDOW_MS;
+        }
+
+        function panYAxis(ticker, fracDelta) {
+            if (!yPanState[ticker]) yPanState[ticker] = { offset: 0 };
+            // Clamped so you can't drift so far the candles leave the viewport entirely.
+            yPanState[ticker].offset = Math.max(-3, Math.min(3, yPanState[ticker].offset + fracDelta));
+        }
         function getZoom(ticker, totalLen) {
             if (!zoomState[ticker]) zoomState[ticker] = { start: 0, end: 1 };
             const z = zoomState[ticker];
@@ -3174,7 +3204,7 @@ Signal line = EMA(9) of MACD line</span>
             const half = (z.end - z.start) * 0.85;
             zoomState[ticker] = { start: Math.max(0, mid-half), end: Math.min(1, mid+half) };
         }
-        function zoomReset(ticker) { zoomState[ticker] = { start:0, end:1 }; yZoomState[ticker] = { padMultiplier: 1 }; }
+        function zoomReset(ticker) { zoomState[ticker] = { start:0, end:1 }; yZoomState[ticker] = { padMultiplier: 1 }; yPanState[ticker] = { offset: 0 }; }
 
         // Shifts the visible window by a fraction of the total data, keeping its width (zoom
         // level) unchanged — this is what dragging the chart actually does. Clamped so the
@@ -3278,7 +3308,7 @@ Signal line = EMA(9) of MACD line</span>
             const bodyW = Math.max(1, Math.min(10, slotW * 0.6));
             const toX   = (i) => PAD_L + (i + 0.5) * slotW;
 
-            function makeYScale(values, top, height, pad=0.06) {
+            function makeYScale(values, top, height, pad=0.06, offsetFrac=0) {
                 const valids = values.filter(v => v !== null && v !== undefined && !isNaN(v));
                 if (!valids.length) return null;
                 let vMax = Math.max(...valids);
@@ -3286,6 +3316,9 @@ Signal line = EMA(9) of MACD line</span>
                 const p = (vMax - vMin) * pad || 1;
                 vMax += p; vMin -= p;
                 const range = vMax - vMin;
+                // Vertical pan: shift the whole visible price window without changing its size.
+                const shift = range * offsetFrac;
+                vMax += shift; vMin += shift;
                 return {
                     vMax, vMin, range,
                     toY: (v) => top + height * (1 - (v - vMin) / range),
@@ -3314,7 +3347,8 @@ Signal line = EMA(9) of MACD line</span>
                 ? [...ohlc.filter(c=>c&&c.h!==null).flatMap(c=>[c.h,c.l])]
                 : prices;
             const yPadMult = (yZoomState[ticker] && yZoomState[ticker].padMultiplier) || 1;
-            const priceScale = makeYScale(priceValues, priceTop, priceH, 0.06 * yPadMult);
+            const yOffset = (yPanState[ticker] && yPanState[ticker].offset) || 0;
+            const priceScale = makeYScale(priceValues, priceTop, priceH, 0.06 * yPadMult, yOffset);
             if (!priceScale) return;
 
             priceScale.drawGrid(4, '$', 2);
@@ -3584,8 +3618,59 @@ Signal line = EMA(9) of MACD line</span>
                 const tip=document.getElementById('xhair-'+ticker); if(tip)tip.style.display='none';
             };
 
-            newCross.addEventListener('mousemove',(e)=>drawCrosshair(e.clientX,e.clientY));
-            newCross.addEventListener('mouseleave',clearCrosshair);
+            // ── Mouse: drag to pan both axes, move to show crosshair ──
+            // Panning was previously touch-only, so on desktop there was no way to scroll the
+            // chart at all once zoomed in. Dragging now pans time (horizontal) and price
+            // (vertical) simultaneously, the way TradingView behaves. Dragging over the price
+            // axis strip pans price only.
+            let mouseDrag = null;
+            newCross.addEventListener('mousedown',(e)=>{
+                if (isSyntheticMouseEvent()) return; // synthetic event echoing a touch — touch path owns this
+                const rect = newCross.getBoundingClientRect();
+                const px = (e.clientX - rect.left) * (W / rect.width);
+                const z = zoomState[ticker] || { start: 0, end: 1 };
+                mouseDrag = {
+                    startX: e.clientX, startY: e.clientY,
+                    startZoomStart: z.start, startZoomEnd: z.end,
+                    startYOffset: (yPanState[ticker] && yPanState[ticker].offset) || 0,
+                    priceAxisOnly: px > W - PAD_R,
+                    moved: false,
+                };
+                newCross.style.cursor = 'grabbing';
+            });
+
+            newCross.addEventListener('mousemove',(e)=>{
+                if (isSyntheticMouseEvent()) return; // touch already drew/handled this
+                if (!mouseDrag) { drawCrosshair(e.clientX,e.clientY); return; }
+
+                const dx = e.clientX - mouseDrag.startX;
+                const dy = e.clientY - mouseDrag.startY;
+                if (!mouseDrag.moved && Math.abs(dx) < 3 && Math.abs(dy) < 3) return; // ignore jitter on a click
+                mouseDrag.moved = true;
+                clearCrosshair();
+
+                if (!mouseDrag.priceAxisOnly) {
+                    const width = mouseDrag.startZoomEnd - mouseDrag.startZoomStart;
+                    const fracDelta = -(dx / W) * width; // drag right → reveal earlier dates
+                    let ns = mouseDrag.startZoomStart + fracDelta;
+                    let ne = mouseDrag.startZoomEnd + fracDelta;
+                    if (ns < 0) { ns = 0; ne = width; }
+                    if (ne > 1) { ne = 1; ns = 1 - width; }
+                    zoomState[ticker] = { start: ns, end: ne };
+                }
+                // Dragging down should move the view toward lower prices (content follows cursor).
+                const yFrac = (dy / PRICE_H);
+                yPanState[ticker] = { offset: Math.max(-3, Math.min(3, mouseDrag.startYOffset + yFrac)) };
+                scheduleDraw();
+            });
+
+            newCross.addEventListener('mouseup',()=>{ mouseDrag = null; newCross.style.cursor = 'crosshair'; });
+            newCross.addEventListener('mouseleave',()=>{
+                mouseDrag = null;
+                newCross.style.cursor = 'crosshair';
+                if (!isSyntheticMouseEvent()) clearCrosshair(); // don't wipe a crosshair a tap just drew
+            });
+            newCross.style.cursor = 'crosshair';
 
             // Scroll wheel: zooms time by default; zooms the price axis instead when the
             // pointer is over the price-axis label strip on the right edge (mirrors dragging it).
@@ -3621,6 +3706,7 @@ Signal line = EMA(9) of MACD line</span>
             }
 
             newCross.addEventListener('touchstart',(e)=>{
+                _lastTouchAt = Date.now();
                 if (e.touches.length === 2) {
                     touchState = { mode: 'pinch', lastPinchDist: Math.hypot(e.touches[0].clientX-e.touches[1].clientX, e.touches[0].clientY-e.touches[1].clientY) };
                     clearCrosshair();
@@ -3637,12 +3723,14 @@ Signal line = EMA(9) of MACD line</span>
                         startY: e.touches[0].clientY,
                         startZoomStart: z.start,
                         startZoomEnd: z.end,
+                        startYOffset: (yPanState[ticker] && yPanState[ticker].offset) || 0,
                     };
                     if (!onPriceAxis) drawCrosshair(e.touches[0].clientX, e.touches[0].clientY); // instant tap feedback
                 }
             },{passive:true});
 
             newCross.addEventListener('touchmove',(e)=>{
+                _lastTouchAt = Date.now();
                 if (!touchState) return;
 
                 if (touchState.mode === 'pinch' && e.touches.length === 2) {
@@ -3683,12 +3771,17 @@ Signal line = EMA(9) of MACD line</span>
                     if (newStart < 0) { newStart = 0; newEnd = width; }
                     if (newEnd > 1) { newEnd = 1; newStart = 1 - width; }
                     zoomState[ticker] = { start: newStart, end: newEnd };
+                    // Once the gesture is already committed to panning the chart, vertical
+                    // movement pans the price axis too — free 2D panning without ever stealing
+                    // page scroll, since we only get here after horizontal motion dominated.
+                    const yFrac = dy / PRICE_H;
+                    yPanState[ticker] = { offset: Math.max(-3, Math.min(3, touchState.startYOffset + yFrac)) };
                     scheduleDraw();
                 }
                 // mode === 'vscroll': nothing to do — no preventDefault means native scroll proceeds
             },{passive:false});
 
-            newCross.addEventListener('touchend',()=>{ touchState = null; },{passive:true});
+            newCross.addEventListener('touchend',()=>{ _lastTouchAt = Date.now(); touchState = null; },{passive:true});
 
             // ── LEGEND ──
             const lastValid=(arr)=>{
