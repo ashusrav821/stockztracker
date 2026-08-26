@@ -15,22 +15,22 @@
             --bg-base: #0a0a0f;
             --header-bg: #0a0a0f;
             --card-bg: #111118;
-            --card-border: #1e1e2a;
+            --card-border: #2e2e40;
             --text-main: #f0f0f8;
-            --text-sub: #6b6b80;
+            --text-sub: #8a8aa3;
             --text-mid: #9898b0;
-            --accent: #6c63ff;
-            --accent-dim: rgba(108, 99, 255, 0.12);
+            --accent: #635af5;
+            --accent-dim: rgba(99, 90, 245, 0.14);
             --buy-color: #00d395;
             --buy-dim: rgba(0, 211, 149, 0.12);
             --sell-color: #ff5c5c;
             --sell-dim: rgba(255, 92, 92, 0.12);
             --hold-color: #f5a623;
             --hold-dim: rgba(245, 166, 35, 0.12);
-            --input-bg: #16161f;
-            --input-border: #2a2a3a;
+            --input-bg: #1c1c28;
+            --input-border: #8a8aa8;
             --hover-bg: #1a1a26;
-            --divider: #1e1e2a;
+            --divider: #2a2a3a;
             --stripe-buy: var(--buy-color);
             --stripe-sell: var(--sell-color);
             --stripe-hold: var(--hold-color);
@@ -41,25 +41,55 @@
             --bg-base: #f4f4f8;
             --header-bg: #ffffff;
             --card-bg: #ffffff;
-            --card-border: #e8e8f0;
+            --card-border: #d0d0e0;
             --text-main: #0f0f1a;
-            --text-sub: #9090a8;
+            --text-sub: #6a6a84;
             --text-mid: #606078;
             --accent: #5b54e8;
             --accent-dim: rgba(91, 84, 232, 0.08);
-            --buy-color: #00b87c;
-            --buy-dim: rgba(0, 184, 124, 0.08);
-            --sell-color: #e84040;
-            --sell-dim: rgba(232, 64, 64, 0.08);
-            --hold-color: #d4880a;
-            --hold-dim: rgba(212, 136, 10, 0.08);
-            --input-bg: #f4f4f8;
-            --input-border: #dcdce8;
+            --buy-color: #008052;
+            --buy-dim: rgba(0, 128, 82, 0.10);
+            --sell-color: #d63232;
+            --sell-dim: rgba(214, 50, 50, 0.10);
+            --hold-color: #a56907;
+            --hold-dim: rgba(165, 105, 7, 0.10);
+            --input-bg: #ffffff;
+            --input-border: #7a7a96;
             --hover-bg: #ebebf4;
-            --divider: #e8e8f0;
+            --divider: #dcdce8;
         }
 
         * { box-sizing: border-box; outline: none; -webkit-tap-highlight-color: transparent; }
+
+        /* ---- FORM CONTROL BASELINE ----
+           Guarantees every input/select/textarea is legible in both themes, even if a more
+           specific rule forgets one of these. Two things this fixes in particular:
+           1. Native <select> dropdown OPTIONS inherit the OS default (light) background on
+              Android/Windows, so dark-theme text was rendering near-invisible against it —
+              options need their colors set explicitly, separately from the select itself.
+           2. Placeholders default to a low-contrast UA gray that all but disappears on the
+              near-black background. */
+        input, select, textarea {
+            background: var(--input-bg);
+            color: var(--text-main);
+            border: 1px solid var(--input-border);
+            border-radius: 10px;
+            font-family: inherit;
+        }
+        select option {
+            background: var(--card-bg);
+            color: var(--text-main);
+        }
+        input::placeholder, textarea::placeholder {
+            color: var(--text-sub);
+            opacity: 1; /* Firefox dims placeholders by default on top of the color */
+        }
+        input:focus, select:focus, textarea:focus {
+            border-color: var(--accent);
+        }
+        /* Force the theme's text color through on iOS, which otherwise overrides it on
+           disabled/auto-filled fields with its own near-invisible default. */
+        input, textarea { -webkit-text-fill-color: var(--text-main); }
 
         html, body { overflow-x: hidden; max-width: 100vw; }
 
@@ -220,9 +250,9 @@
             margin-top: 8px;
             cursor: pointer;
         }
-        .sync-badge.unsynced { background: rgba(255,159,10,0.14); color: var(--hold-color); }
+        .sync-badge.unsynced { background: var(--hold-dim); color: var(--hold-color); }
         .sync-badge.partial { background: var(--accent-dim); color: var(--accent); }
-        .sync-badge.synced { background: rgba(52,199,89,0.14); color: var(--buy-color); cursor: default; }
+        .sync-badge.synced { background: var(--buy-dim); color: var(--buy-color); cursor: default; }
         .sync-status.error { color: var(--sell-color); }
         .sync-status.ok { color: var(--buy-color); }
 
@@ -252,7 +282,22 @@
             cursor: pointer;
             transition: color 0.15s;
         }
-        .bottom-nav-icon { font-size: 1.28rem; line-height: 1; }
+        .bottom-nav-icon { font-size: 1.28rem; line-height: 1; position: relative; display: inline-block; }
+        .nav-badge {
+            position: absolute;
+            top: -4px;
+            right: -10px;
+            min-width: 17px;
+            height: 17px;
+            padding: 0 4px;
+            border-radius: 9px;
+            background: var(--sell-color);
+            color: #fff;
+            font-size: 0.62rem;
+            font-weight: 800;
+            line-height: 17px;
+            text-align: center;
+        }
         .bottom-nav-label { font-size: 0.66rem; font-weight: 700; letter-spacing: 0.2px; }
         .bottom-nav-btn.active { color: var(--accent); }
         .bottom-nav-btn:active { background: var(--hover-bg); }
@@ -770,6 +815,72 @@
         .alert-ticker-empty { font-size: 0.76rem; color: var(--text-sub); padding-left: 26px; }
 
         /* Sticky bulk-action bar — floats above the bottom nav, only shown while 1+ tickers are selected */
+        /* First-run tips banner */
+        .first-run-tip {
+            display: flex;
+            align-items: flex-start;
+            gap: 8px;
+            margin: 10px 12px 0;
+            padding: 11px 12px;
+            background: var(--accent-dim);
+            border: 1px solid var(--accent);
+            border-radius: 12px;
+        }
+        .first-run-tip-body { flex: 1; display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+        .first-run-tip-body strong { font-size: 0.82rem; color: var(--accent); }
+        .first-run-tip-body span { font-size: 0.75rem; color: var(--text-sub); line-height: 1.45; }
+        .first-run-tip-link {
+            align-self: flex-start;
+            background: none;
+            border: none;
+            color: var(--accent);
+            font-size: 0.76rem;
+            font-weight: 800;
+            cursor: pointer;
+            padding: 2px 0;
+        }
+        .first-run-tip-close {
+            background: none;
+            border: none;
+            color: var(--text-sub);
+            font-size: 0.85rem;
+            cursor: pointer;
+            padding: 2px 4px;
+            flex-shrink: 0;
+        }
+
+        /* Undo snackbar — replaces blocking confirm() dialogs for destructive actions */
+        .snackbar {
+            position: fixed;
+            left: 12px; right: 12px;
+            bottom: calc(66px + env(safe-area-inset-bottom, 0px));
+            background: var(--text-main);
+            color: var(--bg-base);
+            border-radius: 12px;
+            padding: 12px 14px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            box-shadow: 0 6px 20px rgba(0,0,0,0.35);
+            z-index: 200;
+            opacity: 0;
+            transform: translateY(16px);
+            pointer-events: none;
+            transition: opacity 0.2s, transform 0.2s;
+        }
+        .snackbar.visible { opacity: 1; transform: translateY(0); pointer-events: auto; }
+        .snackbar-msg { flex: 1; font-size: 0.84rem; font-weight: 600; }
+        .snackbar-action {
+            background: none;
+            border: none;
+            color: var(--accent);
+            font-size: 0.84rem;
+            font-weight: 800;
+            cursor: pointer;
+            padding: 4px 6px;
+            flex-shrink: 0;
+        }
+
         .bulk-alert-bar {
             position: fixed;
             left: 0; right: 0;
@@ -865,7 +976,7 @@
             color: var(--text-sub);
             font-size: 0.88rem;
         }
-        .info-card.error-card { border-color: rgba(255, 92, 92, 0.25); color: var(--sell-color); }
+        .info-card.error-card { border-color: var(--sell-color); color: var(--sell-color); }
         .retry-btn {
             margin-top: 10px;
             background: var(--input-bg);
@@ -951,6 +1062,24 @@
 
     <div class="list-switcher" id="listSwitcher"></div>
 
+    <div class="first-run-tip" id="firstRunTip" style="display:none;">
+        <div class="first-run-tip-body">
+            <strong>👋 Quick tips</strong>
+            <span>Tap a card to expand it · swipe left to remove · drag charts to pan · the Alerts tab does bulk alerts.</span>
+            <button class="first-run-tip-link" onclick="switchTab('guide')">See all tips →</button>
+        </div>
+        <button class="first-run-tip-close" onclick="dismissFirstRunTip()">✕</button>
+    </div>
+
+    <div class="first-run-tip" id="installBanner" style="display:none;">
+        <div class="first-run-tip-body">
+            <strong>📲 Install Stockz Tracker</strong>
+            <span>Add it to your home screen for fullscreen access and alerts that reach your phone.</span>
+            <button class="first-run-tip-link" onclick="installApp()">Install now →</button>
+        </div>
+        <button class="first-run-tip-close" onclick="dismissInstallBanner()">✕</button>
+    </div>
+
     <div class="sort-bar" id="sortBarPortfolio"></div>
 
     <div class="filter-bar" id="filterBar">
@@ -998,13 +1127,18 @@
         <div class="sync-status" id="alertsTabStatus"></div>
     </div>
 
+    <div class="snackbar" id="snackbar">
+        <span class="snackbar-msg" id="snackbarMsg"></span>
+        <button class="snackbar-action" id="snackbarAction">Undo</button>
+    </div>
+
     <nav class="bottom-nav" id="bottomNav">
         <button class="bottom-nav-btn active" id="tab-portfolio" onclick="switchTab('portfolio')">
             <span class="bottom-nav-icon">📊</span>
             <span class="bottom-nav-label">Portfolio</span>
         </button>
         <button class="bottom-nav-btn" id="tab-alerts" onclick="switchTab('alerts')">
-            <span class="bottom-nav-icon">🔔</span>
+            <span class="bottom-nav-icon">🔔<span class="nav-badge" id="alertsNavBadge" style="display:none;">0</span></span>
             <span class="bottom-nav-label">Alerts</span>
         </button>
         <button class="bottom-nav-btn" id="tab-guide" onclick="switchTab('guide')">
@@ -1059,6 +1193,12 @@
             if (list) list.scrollTo({ top: 0, behavior: 'smooth' });
         }
 
+        function dismissFirstRunTip() {
+            localStorage.setItem('tipsDismissed', '1');
+            const el = document.getElementById('firstRunTip');
+            if (el) el.style.display = 'none';
+        }
+
         function switchTab(tab) {
             const portfolio = document.getElementById('watchlist');
             const guide = document.getElementById('guideView');
@@ -1078,6 +1218,9 @@
             const showChrome = tab === 'portfolio' || tab === 'alerts'; // both operate on the active list
             if (filterBar) filterBar.style.display = tab === 'portfolio' ? 'flex' : 'none';
             if (sortBarPortfolio) sortBarPortfolio.style.display = tab === 'portfolio' ? 'block' : 'none';
+            const tipEl = document.getElementById('firstRunTip');
+            if (tipEl && !localStorage.getItem('tipsDismissed')) tipEl.style.display = tab === 'portfolio' ? 'flex' : 'none';
+            refreshInstallUI();
             if (listSwitcher) listSwitcher.style.display = showChrome ? 'flex' : 'none';
 
             tabPortfolio.classList.toggle('active', tab === 'portfolio');
@@ -1202,12 +1345,16 @@
         function deleteList(name) {
             const names = Object.keys(appState.watchlists);
             if (names.length <= 1) { alert("Can't delete your only watchlist"); return; }
+
+            // Snapshot enough to fully restore: the tickers, the list's position in the chip
+            // order, which list was active, and any alert rules about to be purged as orphans.
             const tickersInList = appState.watchlists[name].slice();
-            const count = tickersInList.length;
-            const confirmMsg = count > 0
-                ? `Delete "${name}"? This removes ${count} ticker${count === 1 ? '' : 's'} from this list. Alerts for any of them not in another list will also be removed.`
-                : `Delete "${name}"?`;
-            if (!confirm(confirmMsg)) return;
+            const originalIndex = names.indexOf(name);
+            const previousActive = appState.activeList;
+            const alertsSnapshot = {};
+            tickersInList.forEach(t => {
+                if (appState.alerts[t]) alertsSnapshot[t] = JSON.parse(JSON.stringify(appState.alerts[t]));
+            });
 
             delete appState.watchlists[name];
             if (appState.activeList === name) {
@@ -1220,6 +1367,31 @@
             document.getElementById('watchlist').innerHTML = '<div class="info-card">Fetching...</div>';
             updateData();
             if (appState.ui.activeTab === 'alerts') renderAlertsTab();
+
+            const count = tickersInList.length;
+            showUndoSnackbar(`Deleted "${name}"${count ? ` (${count} ticker${count === 1 ? '' : 's'})` : ''}`, () => {
+                // Rebuild with the list re-inserted at its original position, since object key
+                // order drives chip order — a plain re-add would send it to the end.
+                const rebuilt = {};
+                const currentNames = Object.keys(appState.watchlists);
+                const insertAt = Math.min(originalIndex, currentNames.length);
+                currentNames.slice(0, insertAt).forEach(n => { rebuilt[n] = appState.watchlists[n]; });
+                rebuilt[name] = tickersInList;
+                currentNames.slice(insertAt).forEach(n => { rebuilt[n] = appState.watchlists[n]; });
+                appState.watchlists = rebuilt;
+                appState.activeList = previousActive;
+
+                Object.keys(alertsSnapshot).forEach(t => { appState.alerts[t] = alertsSnapshot[t]; });
+                if (Object.keys(alertsSnapshot).length) {
+                    localStorage.setItem('alerts', JSON.stringify(appState.alerts));
+                    syncAlertsToServer();
+                }
+                saveWatchlistsLocal();
+                persistWatchlist();
+                renderListSwitcher();
+                updateData();
+                if (appState.ui.activeTab === 'alerts') renderAlertsTab();
+            });
         }
 
         // True if `ticker` still appears in at least one watchlist (any list, not just the active one).
@@ -1293,6 +1465,17 @@
         // --- Indicator Guide Content ---
         function getGuideHTML() {
             return `
+                <div class="guide-section">
+                    <h3>📱 Using the App</h3>
+                    <p><strong>Tap a stock card</strong> to expand it — that reveals the chart, news, alerts, and remove buttons.</p>
+                    <p><strong>Swipe a card left</strong> to quickly remove it. You'll get an Undo option if it was a mistake.</p>
+                    <p><strong>Drag the chart sideways</strong> to pan through time, pinch to zoom, and drag the price labels on the right edge to stretch or compress the price scale. <strong>▶ Now</strong> jumps back to the latest dates.</p>
+                    <p><strong>Pull down</strong> on the list to refresh prices immediately.</p>
+                    <p><strong>The Alerts tab</strong> lets you select several stocks at once and apply the same alert to all of them. A red badge there means an alert has fired.</p>
+                    <p><strong>List chips</strong> at the top switch between watchlists — tap ✏️ to rename, ✕ to delete, or <strong>↕ Reorder</strong> to rearrange them.</p>
+                    <p><strong>☁️ in the header</strong> holds your sync PIN (auto-created for you), the Enable Watch Alerts button, and app install.</p>
+                </div>
+
                 <div class="guide-section">
                     <h3>SMA — Simple Moving Average</h3>
                     <p>The average closing price over the last N days. SMA(50) and SMA(20) smooth out daily noise to show the underlying trend. Price above the SMA generally signals an uptrend; below signals a downtrend.</p>
@@ -1966,12 +2149,19 @@ Signal line = EMA(9) of MACD line</span>
 
         // --- Install to Home Screen ---
         // Chrome/Edge/Android fire beforeinstallprompt and let us trigger the native install
-        // dialog programmatically. iOS Safari never fires it — there's no programmatic install
-        // API there — so we detect iOS and show manual "Add to Home Screen" instructions instead.
+        // dialog programmatically. iOS Safari never fires it (no programmatic install API), and
+        // Chrome sometimes doesn't fire it either — it only fires once per page load and only
+        // when its own heuristics are satisfied. So the UI never *depends* on the event: an
+        // install affordance is always shown unless we're already running standalone, falling
+        // back to manual browser-menu instructions when no programmatic prompt is available.
         let deferredInstallPrompt = null;
 
         function isRunningStandalone() {
             return window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
+        }
+
+        function isIosDevice() {
+            return /iphone|ipad|ipod/i.test(navigator.userAgent) && !window.MSStream;
         }
 
         function setInstallStatus(msg, type) {
@@ -1979,47 +2169,62 @@ Signal line = EMA(9) of MACD line</span>
             if (el) { el.textContent = msg; el.className = 'sync-status' + (type ? ' ' + type : ''); }
         }
 
+        // Shows/hides both install affordances (drawer row + main-screen banner) based on
+        // whether the app is already installed.
+        function refreshInstallUI() {
+            const row = document.getElementById('installRow');
+            const banner = document.getElementById('installBanner');
+            const installed = isRunningStandalone();
+            if (row) row.style.display = installed ? 'none' : 'flex';
+            if (banner) {
+                const dismissed = localStorage.getItem('installBannerDismissed');
+                banner.style.display = (!installed && !dismissed && appState.ui.activeTab === 'portfolio') ? 'flex' : 'none';
+            }
+        }
+
+        function dismissInstallBanner() {
+            localStorage.setItem('installBannerDismissed', '1');
+            const banner = document.getElementById('installBanner');
+            if (banner) banner.style.display = 'none';
+        }
+
         window.addEventListener('beforeinstallprompt', (e) => {
             e.preventDefault(); // suppress Chrome's automatic mini-infobar — we show our own button instead
             deferredInstallPrompt = e;
-            if (!isRunningStandalone()) {
-                const row = document.getElementById('installRow');
-                if (row) row.style.display = 'flex';
-            }
+            refreshInstallUI();
         });
 
         window.addEventListener('appinstalled', () => {
             deferredInstallPrompt = null;
-            const row = document.getElementById('installRow');
-            if (row) row.style.display = 'none';
+            localStorage.setItem('installBannerDismissed', '1');
+            refreshInstallUI();
             setInstallStatus('Installed ✓', 'ok');
         });
 
         async function installApp() {
+            // Preferred path: the browser gave us a real deferred prompt.
             if (deferredInstallPrompt) {
                 deferredInstallPrompt.prompt();
                 const { outcome } = await deferredInstallPrompt.userChoice;
                 deferredInstallPrompt = null;
                 if (outcome === 'accepted') {
-                    document.getElementById('installRow').style.display = 'none';
+                    localStorage.setItem('installBannerDismissed', '1');
+                    refreshInstallUI();
                     setInstallStatus('Installed ✓', 'ok');
                 } else {
                     setInstallStatus('Install dismissed', '');
                 }
+                return;
+            }
+            // Fallback: no programmatic prompt available (iOS always; Chrome when its heuristics
+            // haven't fired). Tell the person exactly where the manual option lives instead of
+            // silently doing nothing.
+            if (isIosDevice()) {
+                showToast('On iPhone/iPad: tap Share in Safari, then "Add to Home Screen".', 7000);
+            } else {
+                showToast('Open your browser menu (⋮) and choose "Install app" or "Add to Home screen".', 7000);
             }
         }
-
-        // iOS Safari fallback: no beforeinstallprompt exists there, so if we detect iOS and the
-        // app isn't already running standalone, show instructions instead of a button.
-        (function checkIosInstall() {
-            const isIos = /iphone|ipad|ipod/i.test(navigator.userAgent) && !window.MSStream;
-            if (!isIos || isRunningStandalone()) return;
-            const row = document.getElementById('installRow');
-            if (row) {
-                row.innerHTML = '<div style="font-size:0.78rem;color:var(--text-sub);flex:1;">📲 To install: tap <strong>Share</strong> in Safari, then <strong>"Add to Home Screen"</strong>.</div>';
-                row.style.display = 'flex';
-            }
-        })();
 
         // --- Pull to Refresh ---
         // Each <main> scrolls internally (overflow-y: auto), not the window, so the gesture
@@ -2191,13 +2396,10 @@ Signal line = EMA(9) of MACD line</span>
             }, { passive: true });
         })();
 
+        // Swipe-delete now applies immediately and offers Undo, rather than interrupting with a
+        // confirm() modal — reversible beats interrogative, and avoids the mis-tap-through problem.
         function confirmSwipeDelete(ticker) {
-            if (confirm(`Remove ${ticker} from "${appState.activeList}"?`)) {
-                deleteStock(ticker);
-            } else {
-                const fg = document.getElementById('cardfg-' + ticker);
-                if (fg) { fg.style.transition = 'transform 0.2s'; fg.style.transform = 'translateX(0)'; }
-            }
+            deleteStock(ticker);
         }
 
         // --- Alert System Logic ---
@@ -2322,6 +2524,7 @@ Signal line = EMA(9) of MACD line</span>
                 });
                 appState.alerts = byTicker;
                 localStorage.setItem('alerts', JSON.stringify(appState.alerts));
+                refreshAlertsNavBadge(); // triggered flags come from the server — reflect them immediately
                 return true;
             } catch (e) { return false; /* best-effort */ }
         }
@@ -2437,6 +2640,24 @@ Signal line = EMA(9) of MACD line</span>
 
         // Keeps the sticky bulk-action bar in sync with the current selection — shown only
         // while the Alerts tab is active and at least one ticker is checked.
+        // Counts alerts that have fired (armed=false server-side → triggered=true locally) and
+        // surfaces them as a badge on the Alerts nav tab. Without this, a fired alert is only
+        // visible as a ⚠️ inside a collapsed card — easy to miss entirely, which undercuts the
+        // whole point of having alerts.
+        function countTriggeredAlerts() {
+            return Object.values(appState.alerts).reduce(
+                (sum, rules) => sum + (Array.isArray(rules) ? rules.filter(r => r.triggered).length : 0), 0
+            );
+        }
+
+        function refreshAlertsNavBadge() {
+            const badge = document.getElementById('alertsNavBadge');
+            if (!badge) return;
+            const count = countTriggeredAlerts();
+            badge.textContent = count > 9 ? '9+' : String(count);
+            badge.style.display = count > 0 ? 'block' : 'none';
+        }
+
         function updateBulkAlertBar() {
             const bar = document.getElementById('bulkAlertBar');
             if (!bar) return;
@@ -2647,6 +2868,7 @@ Signal line = EMA(9) of MACD line</span>
         function _doRenderUI() {
             const container = document.getElementById('watchlist');
             if (!container) return;
+            refreshAlertsNavBadge(); // central hook — runs on every state change, no per-callsite patching
             if(activeWatchlist().length === 0) {
                 container.innerHTML = '<div class="info-card">No stocks tracked. Add one above.</div>';
                 if (appState.ui.activeTab === 'alerts') renderAlertsTab();
@@ -3630,11 +3852,80 @@ Signal line = EMA(9) of MACD line</span>
             updateData();
         }
 
+        // --- Undo snackbar ---
+        // Destructive actions apply immediately and offer a time-limited undo instead of asking
+        // for confirmation up front. Undo restores from a snapshot of the exact state that was
+        // removed (including alert rules purged by purgeOrphanedTickerState), so it's a true
+        // revert rather than a partial re-add.
+        let _snackTimer = null;
+        let _pendingUndo = null;
+
+        function hideSnackbar() {
+            clearTimeout(_snackTimer);
+            document.getElementById('snackbar').classList.remove('visible');
+            _pendingUndo = null;
+        }
+
+        // Plain message toast — same element as the undo snackbar, with the action button
+        // hidden. Used for feedback that must be visible while the sync drawer is collapsed.
+        function showToast(message, duration = 5000) {
+            const bar = document.getElementById('snackbar');
+            const msgEl = document.getElementById('snackbarMsg');
+            const actionEl = document.getElementById('snackbarAction');
+            if (!bar || !msgEl || !actionEl) return;
+            clearTimeout(_snackTimer);
+            _pendingUndo = null;
+            msgEl.textContent = message;
+            actionEl.style.display = 'none';
+            bar.classList.add('visible');
+            _snackTimer = setTimeout(hideSnackbar, duration);
+        }
+
+        function showUndoSnackbar(message, undoFn, duration = 6000) {
+            const bar = document.getElementById('snackbar');
+            const msgEl = document.getElementById('snackbarMsg');
+            const actionEl = document.getElementById('snackbarAction');
+            if (!bar || !msgEl || !actionEl) return;
+
+            clearTimeout(_snackTimer);
+            _pendingUndo = undoFn;
+            msgEl.textContent = message;
+            actionEl.textContent = 'Undo';
+            actionEl.style.display = ''; // showToast hides this — restore it or undo silently breaks
+            bar.classList.add('visible');
+
+            actionEl.onclick = () => {
+                if (_pendingUndo) _pendingUndo();
+                hideSnackbar();
+            };
+            _snackTimer = setTimeout(hideSnackbar, duration);
+        }
+
         function deleteStock(ticker) {
-            appState.watchlists[appState.activeList] = activeWatchlist().filter(t => t !== ticker);
+            // Snapshot everything that's about to be removed so Undo can fully restore it.
+            const listName = appState.activeList;
+            const index = activeWatchlist().indexOf(ticker);
+            const alertsSnapshot = appState.alerts[ticker] ? JSON.parse(JSON.stringify(appState.alerts[ticker])) : null;
+            const indicatorsSnapshot = appState.indicators[ticker] ? JSON.parse(JSON.stringify(appState.indicators[ticker])) : null;
+
+            appState.watchlists[listName] = activeWatchlist().filter(t => t !== ticker);
             purgeOrphanedTickerState(ticker);
             persistWatchlist();
             renderUI();
+
+            showUndoSnackbar(`Removed ${ticker}`, () => {
+                const list = appState.watchlists[listName];
+                if (!list) return; // the whole list was deleted in the meantime — nothing to restore into
+                if (!list.includes(ticker)) list.splice(index < 0 ? 0 : index, 0, ticker); // back in its original position
+                if (alertsSnapshot) {
+                    appState.alerts[ticker] = alertsSnapshot;
+                    localStorage.setItem('alerts', JSON.stringify(appState.alerts));
+                    syncAlertsToServer();
+                }
+                if (indicatorsSnapshot) appState.indicators[ticker] = indicatorsSnapshot;
+                persistWatchlist();
+                updateData();
+            });
         }
 
         function retryStock(ticker) {
@@ -3684,6 +3975,10 @@ Signal line = EMA(9) of MACD line</span>
         document.getElementById('listSwitcher').style.display = 'flex'; // Portfolio is the default active tab
         document.getElementById('sortBarPortfolio').innerHTML = getSortSelectHTML('portfolio');
         document.getElementById('sortBarPortfolio').style.display = 'block';
+        if (!localStorage.getItem('tipsDismissed')) {
+            document.getElementById('firstRunTip').style.display = 'flex';
+        }
+        refreshInstallUI(); // not gated on beforeinstallprompt — the affordance is always available
         document.getElementById('pinInput').value = appState.pin; // always set now (auto-generated if new)
         document.getElementById('syncBadgeDrawer').innerHTML = getSyncBadgeHTML();
 
