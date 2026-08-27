@@ -2985,25 +2985,40 @@ Signal line = EMA(9) of MACD line</span>
             const changeColor = changeAbs >= 0 ? 'var(--buy-color)' : 'var(--sell-color)';
             const changeLabel = `${changeSign}${changeAbs.toFixed(2)} (${changeSign}${changePct.toFixed(2)}%)`;
 
-            // Extended-hours quote. Yahoo reports pre/post prices in meta alongside marketState;
-            // the change is measured against the regular-session close (not the previous day's),
-            // which is how brokerages quote after-hours moves.
+            // Extended-hours quotes. Both are measured against the regular-session close (not
+            // the previous day's), which is how brokerages quote extended moves.
+            //
+            // marketState is NOT limited to PRE/REGULAR/POST — outside those narrow windows it
+            // reports CLOSED / PREPRE / POSTPOST while still carrying the prices from the
+            // sessions that already happened. So rather than matching exact state strings, we
+            // show whichever extended prices exist and differ from the regular close, and keep
+            // showing them after their window ends.
+            //
+            // When both exist they're ordered newest-first, which depends on where we are in the
+            // cycle: during/after the post session the after-hours print is the latest; once
+            // pre-market opens the next morning, the pre print is.
             const meta = data.meta || {};
             let extHtml = '';
-            const extPrice = meta.marketState === 'PRE' ? meta.preMarketPrice
-                           : (meta.marketState === 'POST' || meta.marketState === 'POSTPOST') ? meta.postMarketPrice
-                           : null;
-            const regClose = meta.regularMarketPrice !== null && meta.regularMarketPrice !== undefined
-                           ? meta.regularMarketPrice : currentPrice;
-            if (extPrice !== null && extPrice !== undefined && regClose) {
-                const extAbs = extPrice - regClose;
-                const extPct = regClose !== 0 ? (extAbs / regClose) * 100 : 0;
-                const extSign = extAbs >= 0 ? '+' : '';
-                const extColor = extAbs >= 0 ? 'var(--buy-color)' : 'var(--sell-color)';
-                const extLabel = meta.marketState === 'PRE' ? 'Pre' : 'After';
-                extHtml = `<span class="price-ext" style="color:${extColor}">
-                    ${extLabel} $${extPrice.toFixed(2)} ${extSign}${extPct.toFixed(2)}%
-                </span>`;
+            const state = meta.marketState || '';
+            const num = (v) => (typeof v === 'number' && isFinite(v) ? v : null);
+            const regClose = num(meta.regularMarketPrice) !== null ? meta.regularMarketPrice : currentPrice;
+
+            if (state !== 'REGULAR' && regClose) {
+                const buildExt = (price, label) => {
+                    // Skip when identical to the close — no extended trading actually happened,
+                    // and "After $X 0.00%" is noise rather than information.
+                    if (price === null || Math.abs(price - regClose) <= 0.004) return '';
+                    const abs = price - regClose;
+                    const pct = regClose !== 0 ? (abs / regClose) * 100 : 0;
+                    const sign = abs >= 0 ? '+' : '';
+                    const color = abs >= 0 ? 'var(--buy-color)' : 'var(--sell-color)';
+                    return `<span class="price-ext" style="color:${color}">${label} $${price.toFixed(2)} ${sign}${pct.toFixed(2)}%</span>`;
+                };
+
+                const preHtml = buildExt(num(meta.preMarketPrice), 'Pre');
+                const postHtml = buildExt(num(meta.postMarketPrice), 'After');
+                const preIsNewer = (state === 'PRE' || state === 'PREPRE');
+                extHtml = preIsNewer ? (preHtml + postHtml) : (postHtml + preHtml);
             }
 
             const computed = data.computed;
