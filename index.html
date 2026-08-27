@@ -1605,6 +1605,7 @@ Signal line = EMA(9) of MACD line</span>
             ui: { charts: {}, news: {}, alerts: {}, cardExpanded: {}, activeTab: 'portfolio', reorderingLists: false, alertsSubView: 'manage', sortMode: localStorage.getItem('sortMode') || 'manual' },
             dataCache: {},        // keyed by "TICKER:TF" e.g. "AAPL:1D"
             newsCache: {},
+            extendedCache: {},   // ticker -> { marketState, preMarketPrice, postMarketPrice, regularMarketPrice }
             errors: {},
             pin: getOrCreatePin(),
             cloudSynced: false,   // becomes true only after a cloud save actually succeeds — see persistWatchlist/syncAlertsToServer
@@ -2066,6 +2067,23 @@ Signal line = EMA(9) of MACD line</span>
         // that switching between watchlists calls updateData() too: two lists sharing a ticker
         // no longer force a redundant network round-trip just because you switched tabs.
         const FRESH_MS = 30000;
+
+        // Fetches the extended-hours (pre/post market) quote for a ticker. Separate endpoint
+        // because Yahoo's chart meta doesn't carry these — the worker derives them from
+        // intraday candles. Best-effort: failures are swallowed so the card still renders.
+        async function fetchExtendedQuote(ticker) {
+            const prev = appState.extendedCache[ticker];
+            if (prev && prev.fetchedAt && (Date.now() - prev.fetchedAt) < FRESH_MS) return;
+            try {
+                const res = await fetch(`${CONFIG.WORKER_BASE}/api/extended?ticker=${encodeURIComponent(ticker)}`);
+                if (!res.ok) return;
+                const data = await res.json();
+                data.fetchedAt = Date.now();
+                appState.extendedCache[ticker] = data;
+                renderUI();
+            } catch (e) { /* best-effort */ }
+        }
+
         async function updateData(forceRefresh = false) {
             await Promise.all(activeWatchlist().map(async ticker => {
                 ensureTickerState(ticker);
@@ -2093,6 +2111,12 @@ Signal line = EMA(9) of MACD line</span>
                     appState.errors[ticker] = e.message || 'Failed to load';
                     delete appState.dataCache[key];
                 }
+
+                // Extended-hours quote is a separate upstream shape (derived from intraday
+                // candles), so it's fetched independently. Deliberately not awaited into the
+                // error path above: if it fails, prices still render fine, just without the
+                // pre/post line.
+                fetchExtendedQuote(ticker);
 
                 try { evaluateAlerts(ticker); } catch(e) { console.error(`evaluateAlerts failed for ${ticker}:`, e); }
                 renderUI();
@@ -2997,7 +3021,7 @@ Signal line = EMA(9) of MACD line</span>
             // When both exist they're ordered newest-first, which depends on where we are in the
             // cycle: during/after the post session the after-hours print is the latest; once
             // pre-market opens the next morning, the pre print is.
-            const meta = data.meta || {};
+            const meta = appState.extendedCache[ticker] || {};
             let extHtml = '';
             const state = meta.marketState || '';
             const num = (v) => (typeof v === 'number' && isFinite(v) ? v : null);
