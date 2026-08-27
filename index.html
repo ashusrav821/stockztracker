@@ -531,6 +531,12 @@
         .company-meta { font-size: 0.68rem; color: var(--text-sub); }
 
         .price-block { display: flex; flex-direction: column; align-items: flex-end; gap: 1px; }
+        .price-ext {
+            font-size: 0.68rem;
+            font-weight: 700;
+            opacity: 0.9;
+            white-space: nowrap;
+        }
         .price {
             font-size: 1.15rem;
             font-weight: 800;
@@ -2979,6 +2985,27 @@ Signal line = EMA(9) of MACD line</span>
             const changeColor = changeAbs >= 0 ? 'var(--buy-color)' : 'var(--sell-color)';
             const changeLabel = `${changeSign}${changeAbs.toFixed(2)} (${changeSign}${changePct.toFixed(2)}%)`;
 
+            // Extended-hours quote. Yahoo reports pre/post prices in meta alongside marketState;
+            // the change is measured against the regular-session close (not the previous day's),
+            // which is how brokerages quote after-hours moves.
+            const meta = data.meta || {};
+            let extHtml = '';
+            const extPrice = meta.marketState === 'PRE' ? meta.preMarketPrice
+                           : (meta.marketState === 'POST' || meta.marketState === 'POSTPOST') ? meta.postMarketPrice
+                           : null;
+            const regClose = meta.regularMarketPrice !== null && meta.regularMarketPrice !== undefined
+                           ? meta.regularMarketPrice : currentPrice;
+            if (extPrice !== null && extPrice !== undefined && regClose) {
+                const extAbs = extPrice - regClose;
+                const extPct = regClose !== 0 ? (extAbs / regClose) * 100 : 0;
+                const extSign = extAbs >= 0 ? '+' : '';
+                const extColor = extAbs >= 0 ? 'var(--buy-color)' : 'var(--sell-color)';
+                const extLabel = meta.marketState === 'PRE' ? 'Pre' : 'After';
+                extHtml = `<span class="price-ext" style="color:${extColor}">
+                    ${extLabel} $${extPrice.toFixed(2)} ${extSign}${extPct.toFixed(2)}%
+                </span>`;
+            }
+
             const computed = data.computed;
             const rsiArr = computed.rsi || [];
             const smaArr = computed.sma || [];
@@ -3028,6 +3055,7 @@ Signal line = EMA(9) of MACD line</span>
                                 <div class="price-block">
                                     <h2 class="price" style="color:${changeColor}">$${currentPrice.toFixed(2)}</h2>
                                     <span class="price-change" style="color:${changeColor}">${changeLabel}</span>
+                                    ${extHtml}
                                 </div>
                                 <span class="badge ${sigClass}">${comp.signal}</span>
                             </div>
