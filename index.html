@@ -3976,17 +3976,31 @@ Signal line = EMA(9) of MACD line</span>
             if (!e.target.closest('.search-inline')) hideTickerSearchDropdown();
         });
 
+        // Index symbols differ by data provider: Google/CBOE use ^SPX or .INX, Yahoo (our
+        // upstream) uses ^GSPC. Map the common forms so whichever you're used to typing works.
+        const TICKER_ALIASES = {
+            'SPX': '^GSPC', '^SPX': '^GSPC', '.INX': '^GSPC', 'INX': '^GSPC',
+            'INDEXSP:.INX': '^GSPC', 'INDEXSP': '^GSPC', 'GSPC': '^GSPC',
+            'NDX': '^NDX', 'DJI': '^DJI', '.DJI': '^DJI', 'INDEXDJX:.DJI': '^DJI',
+            'VIX': '^VIX', 'IXIC': '^IXIC', 'COMP': '^IXIC', 'RUT': '^RUT',
+        };
+
+        function resolveTickerAlias(sym) {
+            return TICKER_ALIASES[sym] || sym;
+        }
+
         function addStock() {
-            const val = document.getElementById('tickerInput').value.toUpperCase().trim();
+            const raw = document.getElementById('tickerInput').value.toUpperCase().trim();
             const input = document.getElementById('tickerInput');
 
-            if (!val) return;
+            if (!raw) return;
+            const val = resolveTickerAlias(raw.replace(/\s+/g, ''));
 
-            // Validate ticker format: 1–6 uppercase letters/numbers, optionally with . or -
-            // Rejects full names like "Netflix", "Apple Inc", etc.
-            if (!/^[A-Z0-9]{1,6}([.\-][A-Z0-9]{1,4})?$/.test(val)) {
+            // Validate ticker format: 1–6 letters/numbers, optionally with . or -, and an
+            // optional leading ^ for index symbols. Rejects full names like "Netflix".
+            if (!/^\^?[A-Z0-9]{1,6}([.\-][A-Z0-9]{1,4})?$/.test(val)) {
                 input.style.borderColor = 'var(--sell-color)';
-                input.placeholder = 'Use symbol e.g. NFLX, AAPL';
+                input.placeholder = 'Use symbol e.g. NFLX, ^GSPC';
                 setTimeout(() => {
                     input.style.borderColor = '';
                     input.placeholder = 'Ticker or company…';
