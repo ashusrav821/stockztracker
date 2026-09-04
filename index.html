@@ -537,6 +537,35 @@
             opacity: 0.9;
             white-space: nowrap;
         }
+        .price-since {
+            font-size: 0.66rem;
+            font-weight: 700;
+            opacity: 0.85;
+            white-space: nowrap;
+            border-top: 1px dashed var(--divider);
+            padding-top: 2px;
+            margin-top: 1px;
+        }
+        .entry-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex-wrap: wrap;
+            padding: 8px 12px;
+            border-top: 1px solid var(--divider);
+        }
+        .entry-label { font-size: 0.72rem; color: var(--text-sub); font-weight: 600; flex: 1; min-width: 120px; }
+        .entry-btn {
+            background: var(--input-bg);
+            color: var(--text-main);
+            border: 1px solid var(--input-border);
+            border-radius: 8px;
+            padding: 5px 9px;
+            font-size: 0.72rem;
+            font-weight: 700;
+            cursor: pointer;
+        }
+        .entry-btn:active { background: var(--accent-dim); border-color: var(--accent); }
         .price {
             font-size: 1.15rem;
             font-weight: 800;
@@ -1428,6 +1457,11 @@
                 localStorage.setItem('alerts', JSON.stringify(appState.alerts));
                 syncAlertsToServer(); // removes these rules server-side too, so the cron stops evaluating them
             }
+            if (appState.entries[ticker]) {
+                delete appState.entries[ticker];
+                saveEntries();
+            }
+            delete appState.extendedCache[ticker];
         }
 
         // Filter rendered cards by ticker — pure DOM show/hide, no re-render.
@@ -1606,6 +1640,9 @@ Signal line = EMA(9) of MACD line</span>
             dataCache: {},        // keyed by "TICKER:TF" e.g. "AAPL:1D"
             newsCache: {},
             extendedCache: {},   // ticker -> { marketState, preMarketPrice, postMarketPrice, regularMarketPrice }
+            // Entry prices: ticker -> { price, addedAt }. Keyed globally rather than per-list,
+            // so a ticker appearing in two watchlists shares one cost basis.
+            entries: JSON.parse(localStorage.getItem('entries')) || {},
             errors: {},
             pin: getOrCreatePin(),
             cloudSynced: false,   // becomes true only after a cloud save actually succeeds — see persistWatchlist/syncAlertsToServer
@@ -1703,7 +1740,7 @@ Signal line = EMA(9) of MACD line</span>
             fetch(`${CONFIG.WORKER_BASE}/api/prefs`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ pin: appState.pin, prefs: { sortMode: appState.ui.sortMode } }),
+                body: JSON.stringify({ pin: appState.pin, prefs: { sortMode: appState.ui.sortMode, entries: appState.entries } }),
             }).catch(() => {}); // best-effort
         }
 
@@ -1720,6 +1757,19 @@ Signal line = EMA(9) of MACD line</span>
                     appState.ui.sortMode = data.prefs.sortMode;
                     localStorage.setItem('sortMode', data.prefs.sortMode);
                     document.querySelectorAll('.sort-select').forEach(el => { el.value = data.prefs.sortMode; });
+                }
+                // Merge entry prices rather than replacing: a cost basis recorded locally but
+                // not yet synced must not be wiped by an older server copy. Server wins only
+                // for tickers this device has no baseline for.
+                if (data.prefs.entries && typeof data.prefs.entries === 'object') {
+                    let changed = false;
+                    Object.entries(data.prefs.entries).forEach(([t, e]) => {
+                        if (!appState.entries[t] && e && isFinite(e.price)) {
+                            appState.entries[t] = e;
+                            changed = true;
+                        }
+                    });
+                    if (changed) localStorage.setItem('entries', JSON.stringify(appState.entries));
                 }
                 return true;
             } catch (e) { return false; }
@@ -2071,6 +2121,45 @@ Signal line = EMA(9) of MACD line</span>
         // Fetches the extended-hours (pre/post market) quote for a ticker. Separate endpoint
         // because Yahoo's chart meta doesn't carry these — the worker derives them from
         // intraday candles. Best-effort: failures are swallowed so the card still renders.
+        // --- Entry price tracking ---
+        // Records what a ticker cost when you started watching it, so the card can show
+        // performance since you added it (distinct from today's move). Recorded on the first
+        // successful price fetch rather than at add-time, because addStock fires before any
+        // price data exists yet.
+        function saveEntries() {
+            localStorage.setItem('entries', JSON.stringify(appState.entries));
+            syncPrefsToServer();
+        }
+
+        function recordEntryIfNew(ticker, price) {
+            if (!price || !isFinite(price)) return;
+            if (appState.entries[ticker]) return; // already tracked — never silently overwrite a cost basis
+            appState.entries[ticker] = { price, addedAt: new Date().toISOString() };
+            saveEntries();
+        }
+
+        function resetEntryPrice(ticker) {
+            const data = getTickerData(ticker);
+            const current = data && data.prices && data.prices.length ? data.prices[data.prices.length - 1] : null;
+            if (!current) return;
+            appState.entries[ticker] = { price: current, addedAt: new Date().toISOString() };
+            saveEntries();
+            renderUI();
+            showToast(`${ticker} baseline reset to $${current.toFixed(2)}`);
+        }
+
+        function editEntryPrice(ticker) {
+            const existing = appState.entries[ticker];
+            const suggested = existing ? existing.price : '';
+            const input = prompt(`Entry price for ${ticker}:`, suggested);
+            if (input === null) return;
+            const price = parseFloat(input);
+            if (!isFinite(price) || price <= 0) { showToast('Enter a valid price'); return; }
+            appState.entries[ticker] = { price, addedAt: existing ? existing.addedAt : new Date().toISOString() };
+            saveEntries();
+            renderUI();
+        }
+
         async function fetchExtendedQuote(ticker) {
             const prev = appState.extendedCache[ticker];
             if (prev && prev.fetchedAt && (Date.now() - prev.fetchedAt) < FRESH_MS) return;
@@ -2107,6 +2196,7 @@ Signal line = EMA(9) of MACD line</span>
                     data.fetchedAt = Date.now();
                     appState.dataCache[key] = data;
                     delete appState.errors[ticker];
+                    recordEntryIfNew(ticker, data.prices[data.prices.length - 1]);
                 } catch(e) {
                     appState.errors[ticker] = e.message || 'Failed to load';
                     delete appState.dataCache[key];
@@ -3045,6 +3135,21 @@ Signal line = EMA(9) of MACD line</span>
                 extHtml = preIsNewer ? (preHtml + postHtml) : (postHtml + preHtml);
             }
 
+            // Performance since you started watching this ticker — distinct from today's move.
+            let sinceHtml = '';
+            const entry = appState.entries[ticker];
+            if (entry && entry.price && isFinite(entry.price)) {
+                const sAbs = currentPrice - entry.price;
+                const sPct = entry.price !== 0 ? (sAbs / entry.price) * 100 : 0;
+                const sSign = sAbs >= 0 ? '+' : '';
+                const sColor = sAbs >= 0 ? 'var(--buy-color)' : 'var(--sell-color)';
+                const days = Math.max(0, Math.floor((Date.now() - new Date(entry.addedAt).getTime()) / 86400000));
+                const ago = days === 0 ? 'today' : days === 1 ? '1d' : `${days}d`;
+                sinceHtml = `<span class="price-since" style="color:${sColor}" title="Since added at $${entry.price.toFixed(2)}">
+                    Since ${ago}: ${sSign}${sAbs.toFixed(2)} (${sSign}${sPct.toFixed(2)}%)
+                </span>`;
+            }
+
             const computed = data.computed;
             const rsiArr = computed.rsi || [];
             const smaArr = computed.sma || [];
@@ -3095,6 +3200,7 @@ Signal line = EMA(9) of MACD line</span>
                                     <h2 class="price" style="color:${changeColor}">$${currentPrice.toFixed(2)}</h2>
                                     <span class="price-change" style="color:${changeColor}">${changeLabel}</span>
                                     ${extHtml}
+                                    ${sinceHtml}
                                 </div>
                                 <span class="badge ${sigClass}">${comp.signal}</span>
                             </div>
@@ -3170,6 +3276,12 @@ Signal line = EMA(9) of MACD line</span>
                             <button onclick="addCustomAlert('${ticker}')">Set</button>
                         </div>
                         <div class="sync-badge-slot">${getSyncBadgeHTML()}</div>
+                    </div>
+
+                    <div class="entry-row">
+                        <span class="entry-label">${entry ? `Tracking from $${entry.price.toFixed(2)}` : 'No baseline set yet'}</span>
+                        <button class="entry-btn" onclick="editEntryPrice('${ticker}')">Edit</button>
+                        <button class="entry-btn" onclick="resetEntryPrice('${ticker}')">Reset to today</button>
                     </div>
 
                     <!-- Icon-only action bar -->
