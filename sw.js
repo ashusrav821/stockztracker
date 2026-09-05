@@ -1,4 +1,4 @@
-const CACHE_NAME = 'stock-tracker-v5';
+const CACHE_NAME = 'stock-tracker-v6';
 const urlsToCache = [
   './index.html',
   './manifest.json',
@@ -21,7 +21,9 @@ self.addEventListener('install', event => {
       )
     )
   );
-  self.skipWaiting();
+  // NOTE: deliberately NOT calling skipWaiting() here. Letting the new worker sit in "waiting"
+  // is what allows the page to detect it and prompt "new version available" — with automatic
+  // skipWaiting the swap happened invisibly and the user never learned an update existed.
 });
 
 self.addEventListener('activate', event => {
@@ -36,16 +38,41 @@ self.addEventListener('activate', event => {
   self.clients.claim();
 });
 
+// The page sends this after the user accepts the update prompt.
+self.addEventListener('message', event => {
+  if (event.data && event.data.type === 'SKIP_WAITING') self.skipWaiting();
+});
+
 self.addEventListener('fetch', event => {
-  // Don't cache API calls to the worker (always go to network)
-  if (event.request.url.includes('/api/')) {
-    event.respondWith(fetch(event.request));
+  const req = event.request;
+
+  // API calls always go to network — never cached.
+  if (req.url.includes('/api/')) {
+    event.respondWith(fetch(req));
     return;
   }
 
+  // HTML/navigation requests: NETWORK FIRST. This is the fix for "deploys don't show up" —
+  // previously index.html was served cache-first, so a new deploy stayed invisible until the
+  // user manually cleared site data. Falls back to cache when offline.
+  const isHTML = req.mode === 'navigate' ||
+                 (req.headers.get('accept') || '').includes('text/html');
+  if (isHTML) {
+    event.respondWith(
+      fetch(req)
+        .then(res => {
+          const copy = res.clone();
+          caches.open(CACHE_NAME).then(c => c.put(req, copy)).catch(() => {});
+          return res;
+        })
+        .catch(() => caches.match(req).then(r => r || caches.match('./index.html')))
+    );
+    return;
+  }
+
+  // Everything else (icons, CDN scripts): cache first, since those are versioned or static.
   event.respondWith(
-    caches.match(event.request)
-      .then(response => response || fetch(event.request))
+    caches.match(req).then(response => response || fetch(req))
   );
 });
 
