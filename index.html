@@ -2258,12 +2258,73 @@ Signal line = EMA(9) of MACD line</span>
                 </ul>`;
         }
 
-        // --- Service Worker Registration ---
-        // Required both for offline caching (sw.js was previously never registered) and
-        // for Push API notifications, which only deliver to a registered SW.
+        // --- Service Worker Registration + Update Detection ---
+        // Required both for offline caching and for Push API notifications, which only deliver
+        // to a registered SW. Also watches for newly deployed versions and prompts to reload,
+        // rather than silently swapping (or worse, never picking the deploy up at all).
+        let _swRegistration = null;
+        let _reloadingForUpdate = false;
+
+        function promptForUpdate(waitingWorker) {
+            if (!waitingWorker) return;
+            showUpdateSnackbar(() => {
+                // Tell the waiting worker to activate; the controllerchange handler below then
+                // reloads the page so the new assets are actually used.
+                waitingWorker.postMessage({ type: 'SKIP_WAITING' });
+            });
+        }
+
+        function showUpdateSnackbar(onAccept) {
+            const bar = document.getElementById('snackbar');
+            const msgEl = document.getElementById('snackbarMsg');
+            const actionEl = document.getElementById('snackbarAction');
+            if (!bar || !msgEl || !actionEl) return;
+            clearTimeout(_snackTimer);
+            _pendingUndo = null;
+            msgEl.textContent = '🎉 New version available';
+            actionEl.textContent = 'Reload';
+            actionEl.style.display = '';
+            actionEl.onclick = () => { hideSnackbar(); onAccept(); };
+            bar.classList.add('visible');
+            // Deliberately no auto-dismiss timer — an update prompt shouldn't vanish unnoticed.
+        }
+
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {
-                navigator.serviceWorker.register('./sw.js').catch(e => console.error('SW registration failed:', e));
+                navigator.serviceWorker.register('./sw.js').then(reg => {
+                    _swRegistration = reg;
+
+                    // A new version was already downloaded and is waiting from a previous visit.
+                    if (reg.waiting && navigator.serviceWorker.controller) promptForUpdate(reg.waiting);
+
+                    // A new version starts downloading while the app is open.
+                    reg.addEventListener('updatefound', () => {
+                        const nw = reg.installing;
+                        if (!nw) return;
+                        nw.addEventListener('statechange', () => {
+                            // 'installed' + an existing controller means this is an UPDATE, not
+                            // a first-ever install (where prompting would make no sense).
+                            if (nw.state === 'installed' && navigator.serviceWorker.controller) {
+                                promptForUpdate(nw);
+                            }
+                        });
+                    });
+
+                    // Poll for deploys: on tab focus, and hourly for long-lived PWA sessions
+                    // that may stay open for days without a navigation.
+                    const checkForUpdate = () => reg.update().catch(() => {});
+                    document.addEventListener('visibilitychange', () => {
+                        if (document.visibilityState === 'visible') checkForUpdate();
+                    });
+                    setInterval(checkForUpdate, 60 * 60 * 1000);
+                }).catch(e => console.error('SW registration failed:', e));
+
+                // Fires once the new worker takes over — reload so the fresh assets are used.
+                navigator.serviceWorker.addEventListener('controllerchange', () => {
+                    if (_reloadingForUpdate) return; // guard against reload loops
+                    _reloadingForUpdate = true;
+                    window.location.reload();
+                });
             });
         }
 
